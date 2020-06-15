@@ -22,25 +22,38 @@ func AllOriginValid(r *http.Request) bool {
 	return true
 }
 
-type Message interface{}
+type MsgHandler func(msg *Message) error
 
-type Server struct {
-	conn      *websocket.Conn
-	recvChan  chan Message
-	sendChan  chan []byte
-	closeChan chan bool
+type Message struct {
+	Type  uint8
+	Data  []byte
+	Error error
 }
 
-func NewServer(conn *websocket.Conn) *Server {
+type Server struct {
+	conn       *websocket.Conn
+	recvChan   chan *Message
+	sendChan   chan []byte
+	closeChan  chan bool
+	MsgHandler MsgHandler
+}
+
+func NewServer(conn *websocket.Conn, msgHandler MsgHandler) *Server {
 	return &Server{
-		conn:      conn,
-		recvChan:  make(chan Message, 1),
-		closeChan: make(chan bool),
-		sendChan:  make(chan []byte),
+		conn:       conn,
+		recvChan:   make(chan *Message, 1),
+		closeChan:  make(chan bool),
+		sendChan:   make(chan []byte),
+		MsgHandler: msgHandler,
 	}
 }
 
-func HandlerFunc(ctx *gin.Context) {
+func DefaultMsgHandler(msg *Message) error {
+	log.Printf("[DEFAULT TEXT HANDLER] Received Text message: %v", msg)
+	return nil
+}
+
+func (srv *Server) HandlerFunc(ctx *gin.Context) {
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
@@ -48,6 +61,8 @@ func HandlerFunc(ctx *gin.Context) {
 	}
 
 	conn, err := upgrader.Upgrade(ctx.Writer, ctx.Request, nil)
+
+	srv.conn = conn
 
 	if err != nil {
 		errMsg := fmt.Sprintf("Failed to upgrade connection to websockets: %v", err)
@@ -60,14 +75,7 @@ func HandlerFunc(ctx *gin.Context) {
 		ctx.AsciiJSON(500, resp)
 	}
 
-	srv := NewServer(conn)
-
-	go srv.Listen()
-
-}
-
-func decodeTextMsg(data []byte) (Message, error) {
-	return nil, nil
+	srv.Listen()
 }
 
 func (srv *Server) Close() {
@@ -77,12 +85,12 @@ func (srv *Server) Close() {
 
 func (srv *Server) Listen() {
 	go srv.receiveMessages()
-	go srv.processMessages()
 	go srv.writeMessages()
+	go srv.processMessages()
 }
 
-func (srv *Server) Reply(msg string) {
-	srv.sendChan <- []byte(msg)
+func (srv *Server) Reply(msg []byte) {
+	srv.sendChan <- msg
 }
 
 func (srv *Server) writeMessages() {
@@ -122,16 +130,13 @@ func (srv *Server) receiveMessages() {
 
 				switch msgType {
 				case websocket.TextMessage:
+					fallthrough
+				case websocket.BinaryMessage:
 					{
-						if msg, err := decodeTextMsg(data); err != nil {
-							log.Printf("Error decoding msg -> Type:%v Error: %v", msgType, err)
-							srv.Reply("Error decoding message")
-						} else {
-							srv.recvChan <- msg
-						}
+						srv.recvChan <- &Message{uint8(msgType), data, err}
 					}
 					break
-				case websocket.PingMessage, websocket.BinaryMessage, websocket.PongMessage:
+				case websocket.PingMessage, websocket.PongMessage:
 					fallthrough
 				default:
 					{
@@ -149,7 +154,7 @@ func (srv *Server) processMessages() {
 		select {
 		case msg := <-srv.recvChan:
 			log.Printf("Received message: %v\n", msg)
-			srv.Reply("Received message")
+			srv.MsgHandler(msg)
 		case <-srv.closeChan:
 			log.Printf("Closing processing")
 			return

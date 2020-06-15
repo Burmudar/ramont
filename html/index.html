@@ -1,28 +1,135 @@
 <html>
-
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
+    </head>
+  <style>
+      html, body {
+        overflow-x: hidden;
+      }
+      body {
+        position: relative;
+      }
+      .trackpad {
+          width: 100%;
+          height: 400px;
+          background-color: red;
+      }
+  </style>
   <body>
     <h3>WebSocket Go</h3>
+    <div id="trackpad" class="trackpad"></div>
     <pre id="output"></pre>
 
     <script>
-      url = 'ws://localhost:8080/ws';
+      let wsURI = document.URL.replace("http", "ws");
+      url = `${wsURI}ws`;
       c = new WebSocket(url);
+
+      output = (msg) => {
+        document.getElementById("output").append("==> "+msg+"\n")
+      }
       
       send = function(data){
-        document.getElementById("output").append((new Date())+ " ==> "+data+"\n")
-        c.send(data)
+        let msg = { type: "basic", message: `${data}`}
+        document.getElementById("output").append((new Date())+ " ==> "+JSON.stringify(msg)+"\n")
+        c.send(JSON.stringify(msg))
       }
 
       c.onmessage = function(msg){
-        document.getElementById("output").append((new Date())+ " <== "+msg.data+"\n")
-        console.log(msg)
+        let obj = JSON.parse(msg.data);
+        document.getElementById("output").append((new Date())+ " <== "+JSON.stringify(obj)+"\n")
+        console.log(obj)
       }
 
       c.onopen = function(){
-        setInterval( 
-          function(){ send("ping") }
-        , 1000 )
+          send("ping");
       }
+
+      let trackpad = document.getElementById("trackpad");
+      let dragging = false;
+
+      trackpad.addEventListener('mousedown', (ev) => {
+          let msg = {
+              type: "mouse_start",
+              offsetX: ev.offsetX,
+              offsetY: ev.offsetY
+          }
+
+          dragging = true;
+          console.log(msg);
+          c.send(JSON.stringify(msg));
+      }, false);
+
+      trackpad.addEventListener('mousemove', (ev) => {
+          if (dragging === true) {
+            let msg = {
+                type: "mouse_move",
+                offsetX: ev.offsetX,
+                offsetY: ev.offsetY
+            }
+
+            console.log(msg);
+            c.send(JSON.stringify(msg));
+          }
+      }, false);
+
+      trackpad.addEventListener('mouseup', (ev) => {
+          let msg = {
+              type: "mouse_end",
+              offsetX: ev.offsetX,
+              offsetY: ev.offsetY
+          }
+
+          dragging = false;
+          console.log(msg);
+          c.send(JSON.stringify(msg));
+      }, false);
+
+      boundingRect = trackpad.getBoundingClientRect();
+
+      xOffset = boundingRect.x;
+      yOffset = boundingRect.y;
+      
+
+      trackpad.addEventListener("touchstart", (e) => {
+          for (var i=0; i < e.changedTouches.length; i++) {
+            let msg = {
+                type: "mouse_start",
+                offsetX: e.changedTouches[i].clientX - xOffset,
+                offsetY: e.changedTouches[i].clientY - yOffset
+            }
+
+            dragging = true;
+            output(JSON.stringify(msg));
+            c.send(JSON.stringify(msg));
+          } 
+      }, false);
+      trackpad.addEventListener("touchmove", (e) => {
+          for (var i=0; i < e.changedTouches.length; i++) {
+            output(JSON.stringify(e));
+            let msg = {
+                type: "mouse_move",
+                offsetX: e.changedTouches[i].clientX - xOffset,
+                offsetY: e.changedTouches[i].clientY - yOffset
+            }
+
+            output(JSON.stringify(msg));
+            c.send(JSON.stringify(msg));
+          } 
+      }, false);
+      trackpad.addEventListener("touchend", (e) => {
+          for (var i=0; i < e.changedTouches.length; i++) {
+            let msg = {
+                type: "mouse_end",
+                offsetX: e.changedTouches[i].clientX - xOffset,
+                offsetY: e.changedTouches[i].clientY - yOffset
+            }
+
+            dragging = false;
+            output(JSON.stringify(msg));
+            c.send(JSON.stringify(msg));
+          } 
+      }, false);
     </script>
 
   </body>
