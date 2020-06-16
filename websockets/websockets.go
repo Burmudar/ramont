@@ -30,19 +30,19 @@ type Message struct {
 	Error error
 }
 
-type Server struct {
+type Transport struct {
 	conn       *websocket.Conn
 	recvChan   chan *Message
 	sendChan   chan []byte
-	closeChan  chan bool
+	CloseChan  chan bool
 	MsgHandler MsgHandler
 }
 
-func NewServer(conn *websocket.Conn, msgHandler MsgHandler) *Server {
-	return &Server{
+func NewTransport(conn *websocket.Conn, msgHandler MsgHandler) *Transport {
+	return &Transport{
 		conn:       conn,
 		recvChan:   make(chan *Message, 1),
-		closeChan:  make(chan bool),
+		CloseChan:  make(chan bool),
 		sendChan:   make(chan []byte),
 		MsgHandler: msgHandler,
 	}
@@ -53,56 +53,70 @@ func DefaultMsgHandler(msg *Message) error {
 	return nil
 }
 
-func (srv *Server) HandlerFunc(ctx *gin.Context) {
+func (t *Transport) Hijack(ctx *gin.Context) error {
+	if conn, err := UpgradeConn(ctx.Writer, ctx.Request); err != nil {
+		return fmt.Errorf("Failed to upgrade connection to websockets: %v", err)
+	} else {
+		t.conn = conn
+	}
+	return nil
+}
+
+func UpgradeConn(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 		CheckOrigin:     DefaultValidateOrigin,
 	}
 
-	conn, err := upgrader.Upgrade(ctx.Writer, ctx.Request, nil)
-
-	srv.conn = conn
-
+	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		errMsg := fmt.Sprintf("Failed to upgrade connection to websockets: %v", err)
-
-		resp := struct {
-			Success bool
-			Message string
-		}{false, errMsg}
-
-		ctx.AsciiJSON(500, resp)
+		return nil, err
 	}
 
-	srv.Listen()
+	return conn, nil
 }
 
-func (srv *Server) Close() {
-	close(srv.closeChan)
+//This should probably be moved out
+func HandlerFunc(msgHandler MsgHandler) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		t := NewTransport(nil, msgHandler)
+		if err := t.Hijack(ctx); err != nil {
+			resp := struct {
+				Success bool   `json:"success"`
+				Message string `json:"Message"`
+			}{false, fmt.Sprintf("%s", err)}
+			ctx.AsciiJSON(500, resp)
+		}
+		t.Listen()
+	}
+}
+
+func (srv *Transport) Close() {
+	close(srv.CloseChan)
 
 }
 
-func (srv *Server) Listen() {
-	go srv.receiveMessages()
-	go srv.writeMessages()
-	go srv.processMessages()
+func (t *Transport) Listen() {
+	go t.receiveMessages()
+	go t.writeMessages()
+	go t.processMessages()
 }
 
-func (srv *Server) Reply(msg []byte) {
+func (srv *Transport) Reply(msg []byte) {
 	srv.sendChan <- msg
 }
 
-func (srv *Server) writeMessages() {
+func (t *Transport) writeMessages() {
 	log.Printf("Writing messages")
 	for {
 		select {
-		case data := <-srv.sendChan:
+		case data := <-t.sendChan:
 			{
-				srv.conn.WriteMessage(websocket.TextMessage, data)
+				t.conn.WriteMessage(websocket.TextMessage, data)
 			}
 			break
-		case <-srv.closeChan:
+		case <-t.CloseChan:
 			{
 				log.Printf("Closing writing of Messages")
 				return
@@ -111,21 +125,21 @@ func (srv *Server) writeMessages() {
 	}
 }
 
-func (srv *Server) receiveMessages() {
+func (t *Transport) receiveMessages() {
 	log.Printf("Receiving messages")
 	for {
 		select {
-		case <-srv.closeChan:
+		case <-t.CloseChan:
 			{
 				log.Printf("Closing receiving of Messages")
 				return
 			}
 		default:
 			{
-				msgType, data, err := srv.conn.ReadMessage()
+				msgType, data, err := t.conn.ReadMessage()
 
 				if err != nil {
-					srv.Close()
+					t.Close()
 				}
 
 				switch msgType {
@@ -133,7 +147,7 @@ func (srv *Server) receiveMessages() {
 					fallthrough
 				case websocket.BinaryMessage:
 					{
-						srv.recvChan <- &Message{uint8(msgType), data, err}
+						t.recvChan <- &Message{uint8(msgType), data, err}
 					}
 					break
 				case websocket.PingMessage, websocket.PongMessage:
@@ -148,14 +162,14 @@ func (srv *Server) receiveMessages() {
 	}
 }
 
-func (srv *Server) processMessages() {
+func (t *Transport) processMessages() {
 	log.Printf("Processing messages")
 	for {
 		select {
-		case msg := <-srv.recvChan:
+		case msg := <-t.recvChan:
 			log.Printf("Received message: %v\n", msg)
-			srv.MsgHandler(msg)
-		case <-srv.closeChan:
+			t.MsgHandler(msg)
+		case <-t.CloseChan:
 			log.Printf("Closing processing")
 			return
 		}
