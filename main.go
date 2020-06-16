@@ -22,7 +22,8 @@ func start() {
 
 	r.GET("/ws", ramont.HandleFunc)
 
-	r.LoadHTMLFiles("html/index.html")
+	r.Static("static", "static")
+	r.LoadHTMLFiles("static/index.html")
 	r.GET("/", func(ctx *gin.Context) {
 		ctx.HTML(200, "index.html", nil)
 	})

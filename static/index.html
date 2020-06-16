@@ -26,7 +26,7 @@
     <textarea id="output"></textarea>
 
     <script>
-      document.getElementById("output").value = "";
+      /*document.getElementById("output").value = "";
       let wsURI = document.URL.replace("http", "ws");
       url = `${wsURI}ws`;
       c = new WebSocket(url);
@@ -137,8 +137,9 @@
             vlog(msg);
             c.send(JSON.stringify(msg));
           } 
-      }, false);
+      }, false);*/
     </script>
+    <script src="static/dist/app-bundle.js"></script>
 
   </body>
 </html>
