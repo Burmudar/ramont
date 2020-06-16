@@ -48,7 +48,7 @@
 
       c.onmessage = function(msg){
         let obj = JSON.parse(msg.data);
-        output(obj, true);
+        vlog(obj, true);
       }
 
       c.onopen = function(){
