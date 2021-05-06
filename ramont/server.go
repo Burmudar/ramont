@@ -85,8 +85,8 @@ type EventType string
 
 type MouseEvent struct {
 	Type    EventType `json:"type"`
-	OffsetX float32   `json:"offsetX"`
-	OffsetY float32   `json:"offsetY"`
+	OffsetX float64   `json:"offsetX"`
+	OffsetY float64   `json:"offsetY"`
 }
 
 func unmarshalMouseEvent(eventType EventType, raw json.RawMessage) *MouseEvent {
@@ -103,7 +103,8 @@ func (s *Server) HandleMessage(msg *websockets.Message) error {
 	}
 
 	bmsg := BasicMsg{}
-	err := json.Unmarshal(msg.Data, &bmsg)
+	d := msg.Data
+	err := json.Unmarshal(d, &bmsg)
 	if err != nil {
 		if string(msg.Data) == "ping" {
 		}
@@ -145,7 +146,7 @@ func (s *Server) HandleMessage(msg *websockets.Message) error {
 	}
 
 	if event != nil {
-		log.Printf("MouseEvent: %v", event)
+		log.Printf("Server: %v MouseEvent: %v", s.id, event)
 		msg, _ := json.Marshal(struct {
 			Type    string `json:"type"`
 			ID      uint32 `json:"serverID"`
@@ -176,5 +177,4 @@ func (s *Server) Start() {
 
 type BasicMsg struct {
 	Type string `json:"type"`
-	Rest json.RawMessage
 }

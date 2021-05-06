@@ -42,7 +42,7 @@ class WebSocketClient {
     send(obj:any):void {
         let msg = JSON.stringify(obj);
         this.logger(`Sending: ${msg}`);
-        this.conn.send(JSON.stringify(msg));
+        this.conn.send(msg);
     }
 
 }
