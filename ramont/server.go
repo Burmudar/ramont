@@ -6,23 +6,31 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/Burmudar/ramon-go/websockets"
+	"github.com/Burmudar/ramon-go/ramont/network"
+	"github.com/Burmudar/ramon-go/ramont/websockets"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 )
 
 var globalServerStore *serverStore
 
 func initServerStore() {
-	globalServerStore = &serverStore{store: make(map[uint32]*Server)}
+	globalServerStore = &serverStore{store: make(map[uint32]Server)}
 }
 
-type Server struct {
+type Server interface {
+	AssignID(id uint32)
+	ID() uint32
+	Start()
+}
+
+type WebSocketServer struct {
 	id        uint32
-	transport *websockets.Transport
+	transport network.Transport
 }
 
 type serverStore struct {
-	store map[uint32]*Server
+	store map[uint32]Server
 	mutex sync.Mutex
 	guid  uint32
 }
@@ -36,25 +44,24 @@ func (str *serverStore) currId() uint32 {
 	return atomic.LoadUint32(&str.guid)
 }
 
-func (str *serverStore) register(s *Server) {
+func (str *serverStore) register(s Server) {
 	str.mutex.Lock()
 	defer str.mutex.Unlock()
-	s.id = str.genId()
-	str.store[s.id] = s
+	s.AssignID(str.genId())
+	str.store[s.ID()] = s
 }
 
-func (str *serverStore) deregister(s *Server) {
+func (str *serverStore) deregister(s Server) {
 	str.mutex.Lock()
 	defer str.mutex.Unlock()
-	delete(str.store, s.id)
+	delete(str.store, s.ID())
 }
 
-func NewServer(transport *websockets.Transport) *Server {
-	srv := new(Server)
-	transport.MsgHandler = srv.HandleMessage
-	srv.transport = transport
+func NewWebSocketServer(conn *websocket.Conn) Server {
+	srv := WebSocketServer{}
+	srv.transport = websockets.NewTransport(conn, srv.HandleMessage)
 
-	return srv
+	return &srv
 }
 
 func HandleFunc(ctx *gin.Context) {
@@ -67,16 +74,14 @@ func HandleFunc(ctx *gin.Context) {
 		return
 	}
 
-	transport := websockets.NewTransport(conn, nil)
-
-	srv := NewServer(transport)
+	srv := NewWebSocketServer(conn)
 
 	if globalServerStore == nil {
 		initServerStore()
 	}
 
 	globalServerStore.register(srv)
-	log.Printf("Registered server: %v", srv.id)
+	log.Printf("Registered server: %v", srv.ID())
 
 	srv.Start()
 }
@@ -97,7 +102,16 @@ func unmarshalMouseEvent(eventType EventType, raw json.RawMessage) *MouseEvent {
 	return &event
 }
 
-func (s *Server) HandleMessage(msg *websockets.Message) error {
+func (s *WebSocketServer) AssignID(id uint32) {
+	s.id = id
+
+}
+
+func (s *WebSocketServer) ID() uint32 {
+	return s.id
+}
+
+func (s *WebSocketServer) HandleMessage(msg *network.Message) error {
 	if msg.Error != nil {
 		log.Fatalf("Problem occured while receiving msg: %v", msg.Error)
 	}
@@ -137,7 +151,7 @@ func (s *Server) HandleMessage(msg *websockets.Message) error {
 				Message string `json:"message"`
 			}{"control", s.id, "pong"})
 
-			s.transport.Reply(msg)
+			s.transport.Send(msg)
 		}
 	default:
 		{
@@ -153,18 +167,18 @@ func (s *Server) HandleMessage(msg *websockets.Message) error {
 			Message string `json:"message"`
 		}{"control", s.id, "received"})
 
-		s.transport.Reply(msg)
+		s.transport.Send(msg)
 	}
 
 	return err
 }
 
-func (s *Server) Start() {
+func (s *WebSocketServer) Start() {
 	s.transport.Listen()
 
 	go func() {
 		select {
-		case <-s.transport.CloseChan:
+		case <-s.transport.CloseChan():
 			{
 				globalServerStore.deregister(s)
 				log.Printf("Transport closed. Deregistered server: %v", s.id)
