@@ -1,6 +1,9 @@
 **/*
 !.gitignore
-!*.c
-!*.h
-!Makefile
-!*.txt
+!**/*.c
+!**/*.h
+!compile_flags.txt
+!CMakeLists.txt
+!src/
+!tests/
+
