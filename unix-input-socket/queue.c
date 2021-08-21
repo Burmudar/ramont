@@ -1,69 +1,36 @@
 #include <errno.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-
 #include "queue.h"
 
-node_t *new_node(int data, node_t *next, node_t *prev) {
-  node_t *n = NULL;
-  n = (node_t *)malloc(sizeof(node_t));
+void enqueue(struct queue *q, int val) {
+    struct entry *n = malloc(sizeof(struct entry));
 
-  n->data = data;
-  n->next = next;
-  n->prev = prev;
+    n->data = val;
 
-  return n;
+    TAILQ_INSERT_TAIL(&q->head, n, entries);
+
+    q->size++;
 }
 
-queue_t *new_queue() {
-  queue_t *q = NULL;
-  q = (queue_t *)malloc(sizeof(queue_t));
+int dequeue(struct queue *q) {
+    struct entry *item = TAILQ_FIRST(&q->head);
+    int result = item->data;
 
-  q->head = NULL;
-  q->tail = NULL;
-  q->size = 0;
+    TAILQ_REMOVE(&q->head, item, entries);
+    q->size--;
 
-  return q;
+    return result;
 }
 
-void enqueue(queue_t *q, int data) {
-  node_t *tmp = new_node(data, NULL, NULL);
+struct queue* new_queue()  {
+    struct queue *q;
+    q = malloc(sizeof(struct queue));
 
-  if (q->head == NULL) {
-    q->head = tmp;
-  } else {
-    tmp->prev = q->tail;
-    q->tail->next = tmp;
-  }
+    TAILQ_INIT(&q->head);
 
-  q->tail = tmp;
-  q->size++;
-}
+    q->size = 0;
 
-void *dequeue(queue_t *q) {
-  node_t *tmp = q->head;
-  if (tmp == NULL) {
-    return NULL;
-  }
-
-  q->head = q->head->next;
-
-  tmp->next = NULL;
-  tmp->prev = NULL;
-  int result = tmp->data;
-
-  q->size--;
-
-  free(tmp);
-  return &result;
-}
-
-void print_queue(queue_t *q) {
-  node_t *curr = q->head;
-
-  while (curr != NULL) {
-    printf("%d\n", curr->data);
-    curr = curr->next;
-  }
+    return q;
 }

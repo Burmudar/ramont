@@ -1,19 +1,21 @@
 #ifndef HEADER_FILE
 #define HEADER_FILE
-typedef struct node {
+#include <sys/queue.h>
+typedef struct entry {
   int data;
-  struct node *next;
-  struct node *prev;
-} node_t;
+  TAILQ_ENTRY(entry) entries;
+} entry;
+
+
+TAILQ_HEAD(tailhead, entry);
+
 
 typedef struct queue {
-  node_t *head;
-  node_t *tail;
-  int size;
-} queue_t;
+    struct tailhead head;
+    int size;
+} queue;
 
-queue_t *new_queue();
-void enqueue(queue_t *q, int data);
-void *dequeue(queue_t *q);
-void print_queue(queue_t *q);
+queue *new_queue();
+void enqueue(struct queue *q, int data);
+int dequeue(struct queue *q);
 #endif
