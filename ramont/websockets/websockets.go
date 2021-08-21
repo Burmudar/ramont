@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/Burmudar/ramon-go/ramont/network"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
@@ -22,38 +23,30 @@ func AllOriginValid(r *http.Request) bool {
 	return true
 }
 
-type MsgHandler func(msg *Message) error
-
-type Message struct {
-	Type  uint8
-	Data  []byte
-	Error error
-}
-
-type Transport struct {
+type WebSocketTransport struct {
 	conn       *websocket.Conn
-	recvChan   chan *Message
+	recvChan   chan *network.Message
 	sendChan   chan []byte
-	CloseChan  chan bool
-	MsgHandler MsgHandler
+	closeChan  chan bool
+	MsgHandler network.MsgHandler
 }
 
-func NewTransport(conn *websocket.Conn, msgHandler MsgHandler) *Transport {
-	return &Transport{
+func NewTransport(conn *websocket.Conn, msgHandler network.MsgHandler) network.Transport {
+	return &WebSocketTransport{
 		conn:       conn,
-		recvChan:   make(chan *Message, 1),
-		CloseChan:  make(chan bool),
+		recvChan:   make(chan *network.Message, 1),
+		closeChan:  make(chan bool),
 		sendChan:   make(chan []byte),
 		MsgHandler: msgHandler,
 	}
 }
 
-func DefaultMsgHandler(msg *Message) error {
+func DefaultMsgHandler(msg *network.Message) error {
 	log.Printf("[DEFAULT TEXT HANDLER] Received Text message: %v", msg)
 	return nil
 }
 
-func (t *Transport) Hijack(ctx *gin.Context) error {
+func (t *WebSocketTransport) Hijack(ctx *gin.Context) error {
 	if conn, err := UpgradeConn(ctx.Writer, ctx.Request); err != nil {
 		return fmt.Errorf("Failed to upgrade connection to websockets: %v", err)
 	} else {
@@ -78,10 +71,12 @@ func UpgradeConn(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error
 }
 
 //This should probably be moved out
-func HandlerFunc(msgHandler MsgHandler) gin.HandlerFunc {
+/*
+func HandlerFunc(msgHandler network.MsgHandler) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		t := NewTransport(nil, msgHandler)
-		if err := t.Hijack(ctx); err != nil {
+		wsTransport, _ := t.(*WebSocketTransport)
+		if err := wsTransport.Hijack(ctx); err != nil {
 			resp := struct {
 				Success bool   `json:"success"`
 				Message string `json:"Message"`
@@ -91,23 +86,28 @@ func HandlerFunc(msgHandler MsgHandler) gin.HandlerFunc {
 		t.Listen()
 	}
 }
+*/
 
-func (srv *Transport) Close() {
-	close(srv.CloseChan)
+func (srv *WebSocketTransport) CloseChan() chan bool {
+	return srv.closeChan
+}
+
+func (srv *WebSocketTransport) Close() {
+	close(srv.closeChan)
 
 }
 
-func (t *Transport) Listen() {
+func (t *WebSocketTransport) Listen() {
 	go t.receiveMessages()
 	go t.writeMessages()
 	go t.processMessages()
 }
 
-func (srv *Transport) Reply(msg []byte) {
+func (srv *WebSocketTransport) Send(msg []byte) {
 	srv.sendChan <- msg
 }
 
-func (t *Transport) writeMessages() {
+func (t *WebSocketTransport) writeMessages() {
 	log.Printf("Writing messages")
 	for {
 		select {
@@ -116,7 +116,7 @@ func (t *Transport) writeMessages() {
 				t.conn.WriteMessage(websocket.TextMessage, data)
 			}
 			break
-		case <-t.CloseChan:
+		case <-t.closeChan:
 			{
 				log.Printf("Closing writing of Messages")
 				return
@@ -125,11 +125,11 @@ func (t *Transport) writeMessages() {
 	}
 }
 
-func (t *Transport) receiveMessages() {
+func (t *WebSocketTransport) receiveMessages() {
 	log.Printf("Receiving messages")
 	for {
 		select {
-		case <-t.CloseChan:
+		case <-t.closeChan:
 			{
 				log.Printf("Closing receiving of Messages")
 				return
@@ -147,7 +147,7 @@ func (t *Transport) receiveMessages() {
 					fallthrough
 				case websocket.BinaryMessage:
 					{
-						t.recvChan <- &Message{uint8(msgType), data, err}
+						t.recvChan <- &network.Message{uint8(msgType), data, err}
 					}
 					break
 				case websocket.PingMessage, websocket.PongMessage:
@@ -162,14 +162,14 @@ func (t *Transport) receiveMessages() {
 	}
 }
 
-func (t *Transport) processMessages() {
+func (t *WebSocketTransport) processMessages() {
 	log.Printf("Processing messages")
 	for {
 		select {
 		case msg := <-t.recvChan:
 			log.Printf("Received message: %v\n", msg)
 			t.MsgHandler(msg)
-		case <-t.CloseChan:
+		case <-t.closeChan:
 			log.Printf("Closing processing")
 			return
 		}
