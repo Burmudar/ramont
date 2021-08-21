@@ -14,6 +14,8 @@ import (
 
 var globalServerStore *serverStore
 
+type EventHandelerFunc func(ev Event) error
+
 func initServerStore() {
 	globalServerStore = &serverStore{store: make(map[uint32]Server)}
 }
@@ -25,8 +27,9 @@ type Server interface {
 }
 
 type WebSocketServer struct {
-	id        uint32
-	transport network.Transport
+	id             uint32
+	transport      network.Transport
+	eventHandlerFn EventHandelerFunc
 }
 
 type serverStore struct {
@@ -57,41 +60,51 @@ func (str *serverStore) deregister(s Server) {
 	delete(str.store, s.ID())
 }
 
-func NewWebSocketServer(conn *websocket.Conn) Server {
+func NewWebSocketServer(conn *websocket.Conn, evHandler EventHandelerFunc) Server {
 	srv := WebSocketServer{}
 	srv.transport = websockets.NewTransport(conn, srv.HandleMessage)
+	srv.eventHandlerFn = evHandler
 
 	return &srv
 }
 
-func HandleFunc(ctx *gin.Context) {
+func EventAwareHandler(eventHandler EventHandelerFunc) func(ctx *gin.Context) {
+	return func(ctx *gin.Context) {
+		conn, err := websockets.UpgradeConn(ctx.Writer, ctx.Request)
+		if err != nil {
+			ctx.AbortWithStatusJSON(500, struct {
+				Message string
+			}{"failed to upgrade connection to support websockets"})
+			return
+		}
 
-	conn, err := websockets.UpgradeConn(ctx.Writer, ctx.Request)
-	if err != nil {
-		ctx.AbortWithStatusJSON(500, struct {
-			Message string
-		}{"failed to upgrade connection to support websockets"})
-		return
+		srv := NewWebSocketServer(conn, eventHandler)
+
+		if globalServerStore == nil {
+			initServerStore()
+		}
+
+		globalServerStore.register(srv)
+		log.Printf("Registered server: %v", srv.ID())
+
+		srv.Start()
 	}
-
-	srv := NewWebSocketServer(conn)
-
-	if globalServerStore == nil {
-		initServerStore()
-	}
-
-	globalServerStore.register(srv)
-	log.Printf("Registered server: %v", srv.ID())
-
-	srv.Start()
 }
 
 type EventType string
+
+type Event interface {
+	TypeOf() EventType
+}
 
 type MouseEvent struct {
 	Type    EventType `json:"type"`
 	OffsetX float64   `json:"offsetX"`
 	OffsetY float64   `json:"offsetY"`
+}
+
+func (me *MouseEvent) TypeOf() EventType {
+	return me.Type
 }
 
 func unmarshalMouseEvent(eventType EventType, raw json.RawMessage) *MouseEvent {
@@ -109,6 +122,25 @@ func (s *WebSocketServer) AssignID(id uint32) {
 
 func (s *WebSocketServer) ID() uint32 {
 	return s.id
+}
+
+func (s *WebSocketServer) reply(msg []byte) error {
+	s.transport.Send(msg)
+	return nil
+}
+
+func (s *WebSocketServer) processEvent(ev *MouseEvent) error {
+	if ev != nil {
+		s.eventHandlerFn(ev)
+		msg, _ := json.Marshal(struct {
+			Type    string `json:"type"`
+			ID      uint32 `json:"serverID"`
+			Message string `json:"message"`
+		}{"control", s.id, "received"})
+
+		s.reply(msg)
+	}
+	return nil
 }
 
 func (s *WebSocketServer) HandleMessage(msg *network.Message) error {
@@ -159,16 +191,7 @@ func (s *WebSocketServer) HandleMessage(msg *network.Message) error {
 		}
 	}
 
-	if event != nil {
-		log.Printf("Server: %v MouseEvent: %v", s.id, event)
-		msg, _ := json.Marshal(struct {
-			Type    string `json:"type"`
-			ID      uint32 `json:"serverID"`
-			Message string `json:"message"`
-		}{"control", s.id, "received"})
-
-		s.transport.Send(msg)
-	}
+	s.processEvent(event)
 
 	return err
 }
