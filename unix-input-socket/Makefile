@@ -1,8 +1,10 @@
-build-example:
-	clang -Wall --std=c17 -I/usr/include/libevdev-1.0 -levdev example.c
+build:
+	cmake -B_builds -DTARGET_GROUP=test
+	cmake --build _builds
 
-build-unix: unix_socket.c
-	clang -Wall --std=c17 -I/usr/include/libevdev-1.0 -levdev unix_socket.c -o unix
+release:
+	cmake -B_builds -DTARGET_GROUP=release
+	cmake --build _builds
 
-run-unix: build-unix
-	./unix
+clean:
+	rm -rf _builds
