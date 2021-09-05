@@ -5,6 +5,7 @@ import (
 	"log"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/Burmudar/ramon-go/ramont/network"
 	"github.com/Burmudar/ramon-go/ramont/websockets"
@@ -154,7 +155,8 @@ func (s *WebSocketServer) HandleMessage(msg *network.Message) error {
 	if err != nil {
 		if string(msg.Data) == "ping" {
 		}
-		log.Printf("Error handling message - Unmarshall Error: '%v' Data: %v", err, string(msg.Data))
+        t := time.Now()
+        log.Printf("Time: %v Error handling message - Unmarshall Error: '%v' Data: %v", t, err, string(msg.Data))
 		return err
 	}
 

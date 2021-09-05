@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"time"
 
 	"github.com/Burmudar/ramon-go/ramont"
 	"github.com/gin-gonic/gin"
@@ -26,7 +27,7 @@ func screenshotOnMac() {
 func unixHandler() ramont.EventHandelerFunc {
 	var d net.Dialer
 
-	remoteAddr := net.UnixAddr{Name: "/home/william/programming/virtual-mouse/echo_socket", Net: "Unix"}
+	remoteAddr := net.UnixAddr{Name: "/home/william/programming/ramont/unix-input-socket/src/uv.socket", Net: "Unix"}
 	conn, err := d.Dial("unix", remoteAddr.String())
 	if err != nil {
 		log.Fatalf("Failed to dial: %v", err)
@@ -38,16 +39,17 @@ func unixHandler() ramont.EventHandelerFunc {
 		defer conn.Close()
 
 		writer := bufio.NewWriter(conn)
-		reader := bufio.NewReader(conn)
+		//reader := bufio.NewReader(conn)
 		for {
 			select {
 			case data := <-recvChan:
 				{
 					writer.Write(data)
 					writer.Flush()
-					log.Printf("reading from unix socket")
-					content, err := reader.ReadString('\n')
-					log.Printf("Error[%v] Unix> %s\n", err, content)
+                    log.Printf("Time: %v Writing to unix socket", time.Now())
+					//log.Printf("reading from unix socket")
+					//content, err := reader.ReadString('\n')
+					//log.Printf("Error[%v] Unix> %s\n", err, content)
 				}
 			}
 		}
