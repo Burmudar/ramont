@@ -28,27 +28,26 @@ char *time_now() {
 }
 
 void update_mouse(uv_work_t *req) {
+  char* data = ((char *)req->data);
 
-  char* stuff = ((char*) req->data);
   char *now = time_now();
-  fprintf(stderr, "[%s] Work: %s\n", now, stuff);
-  free(now);
-  //free(stuff);
+  fprintf(stderr, "[%s] Got mouse data: %s\n", now, data);
 
-  // async.data = (void *)points;
-  // uv_async_send(&async);
+  /*double points[2] = {1.0, 2.0};
+  async.data = (void *)points;
+  uv_async_send(&async);*/
+  free(now);
 }
 
 void print_mouse_change(uv_async_t *handle) {
   double *point = ((double *)handle->data);
   fprintf(stderr, "Moved mouse - x: %f y: %f\n", *point, *(point + 1));
-  free(point);
 }
 
 void cleanup(uv_work_t *req, int status) {
-  // fprintf(stderr, "cleaning up after mouse change");
-  // char *data = *((char **)req->data);
-  // free(data);
+  //fprintf(stderr, "cleaning up after mouse change");
+  char *data = ((char *)req->data);
+  free(data);
   // we should probably not clean async up here since multiple work requests
   // will use this async ? uv_close((uv_handle_t *)&async, NULL);
 }
@@ -59,25 +58,25 @@ void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
   buf->len = suggested_size;
 }
 
+
 void process_data(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf) {
-  fprintf(stderr, "buff size: %ld buff len: %zu nread: %zd\n",
-          sizeof(buf->base), buf->len, nread);
+  fprintf(stderr, "buff size: %ld buff len: %zu nread: %zd\n", sizeof(buf->base), buf->len, nread);
   if (nread > 0) {
 
     uv_work_t req;
 
-    // char *data = malloc(sizeof(char) * 5);
-    /*strncpy(data, buf->base, nread);
+    char* data = malloc(sizeof(char) * nread);
+    strncpy(data, buf->base, nread);
     for (int i = 0; i < 100; i++ ) {
         fprintf(stderr, "'%c' ", buf->base[i]);
     }
-    fprintf(stderr, "\n");*/
-    char* stuff = "William";
-    req.data = (void *)stuff;
+    fprintf(stderr, "\n");
 
-    fprintf(stderr, "queueing work: %d\n", 0);
+    req.data = (void *)data;
+    fprintf(stderr, "queueing work: %s\n", data);
     int r = uv_queue_work(loop, &req, update_mouse, cleanup);
-    //fprintf(stderr, "queue result: %d\n", r);
+    if (r != 0)
+        fprintf(stderr, "failed to queue work: %d", r);
   }
 
   if (nread < 0) {
@@ -87,7 +86,9 @@ void process_data(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf) {
     uv_close((uv_handle_t *)client, NULL);
   }
 
-  free(buf->base);
+  if (buf->base) {
+      free(buf->base);
+  }
 }
 
 void on_new_connection(uv_stream_t *server, int status) {
