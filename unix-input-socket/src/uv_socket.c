@@ -45,7 +45,7 @@ void print_mouse_change(uv_async_t *handle) {
 }
 
 void cleanup(uv_work_t *req, int status) {
-  //fprintf(stderr, "cleaning up after mouse change");
+  fprintf(stderr, "cleaning up after mouse change");
   char *data = ((char *)req->data);
   free(data);
   // we should probably not clean async up here since multiple work requests
@@ -67,6 +67,7 @@ void process_data(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf) {
     uv_work_t req;
 
     char *data = malloc(sizeof(char) * nread);
+    // events are supposed to be separated by '\n'
     int n = sscanf(buf->base, "%[^\n]", data);
     int length = strlen(data);
 
@@ -82,6 +83,7 @@ void process_data(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf) {
         fprintf(stderr, "failed to queue work: %d", r);
     }
     if (length < nread) {
+      // since there are more events, we should read the events here and add the events to an array?
       fprintf(stderr, "[WARNING] More than one event in stream - only read first\n");
       fprintf(stderr, "Data: '%s'\n", buf->base);
     }
