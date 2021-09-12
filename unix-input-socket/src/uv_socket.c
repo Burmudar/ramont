@@ -28,7 +28,7 @@ char *time_now() {
 }
 
 void update_mouse(uv_work_t *req) {
-  char* data = ((char *)req->data);
+  char *data = ((char *)req->data);
 
   char *now = time_now();
   fprintf(stderr, "[%s] Got mouse data: %s\n", now, data);
@@ -54,29 +54,37 @@ void cleanup(uv_work_t *req, int status) {
 
 void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
   // TODO: Need to look in reusing buffers
-  buf->base = malloc(suggested_size);
+  // calloc zeroes out memory, if we use malloc there is left over garbage memory like trailing  '}'
+  buf->base = calloc(suggested_size, sizeof(char));
   buf->len = suggested_size;
 }
 
-
 void process_data(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf) {
-  fprintf(stderr, "buff size: %ld buff len: %zu nread: %zd\n", sizeof(buf->base), buf->len, nread);
+  fprintf(stderr, "buff size: %ld buff len: %zu nread: %zd\n",
+          sizeof(buf->base), buf->len, nread);
   if (nread > 0) {
 
     uv_work_t req;
 
-    char* data = malloc(sizeof(char) * nread);
-    strncpy(data, buf->base, nread);
-    for (int i = 0; i < 100; i++ ) {
-        fprintf(stderr, "'%c' ", buf->base[i]);
-    }
-    fprintf(stderr, "\n");
+    char *data = malloc(sizeof(char) * nread);
+    int n = sscanf(buf->base, "%[^\n]", data);
+    int length = strlen(data);
 
-    req.data = (void *)data;
-    fprintf(stderr, "queueing work: %s\n", data);
-    int r = uv_queue_work(loop, &req, update_mouse, cleanup);
-    if (r != 0)
+    // n is the number of arguments sscanf was able to assign, since we only have one, it should be 0 / 1
+    if (n == 0) {
+      //sscanf was unable to assign data
+      fprintf(stderr, "Failed to read event: '%s'\n", buf->base);
+    } else if (length + 1 == nread) {
+      req.data = (void *)data;
+      fprintf(stderr, "queueing work: %s\n", data);
+      int r = uv_queue_work(loop, &req, update_mouse, cleanup);
+      if (r != 0)
         fprintf(stderr, "failed to queue work: %d", r);
+    }
+    if (length < nread) {
+      fprintf(stderr, "[WARNING] More than one event in stream - only read first\n");
+      fprintf(stderr, "Data: '%s'\n", buf->base);
+    }
   }
 
   if (nread < 0) {
@@ -87,7 +95,7 @@ void process_data(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf) {
   }
 
   if (buf->base) {
-      free(buf->base);
+    free(buf->base);
   }
 }
 
