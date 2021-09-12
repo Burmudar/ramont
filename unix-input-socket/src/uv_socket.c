@@ -69,13 +69,13 @@ void process_data(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf) {
     char *data = malloc(sizeof(char) * nread);
     // events are supposed to be separated by '\n'
     int n = sscanf(buf->base, "%[^\n]", data);
-    int length = strlen(data);
+    int length = strlen(data) + 1; // plus 1 for \0
 
     // n is the number of arguments sscanf was able to assign, since we only have one, it should be 0 / 1
     if (n == 0) {
       //sscanf was unable to assign data
       fprintf(stderr, "Failed to read event: '%s'\n", buf->base);
-    } else if (length + 1 == nread) {
+    } else if (length == nread) {
       req.data = (void *)data;
       fprintf(stderr, "queueing work: %s\n", data);
       int r = uv_queue_work(loop, &req, update_mouse, cleanup);

@@ -27,7 +27,8 @@ func screenshotOnMac() {
 func unixHandler() ramont.EventHandelerFunc {
 	var d net.Dialer
 
-	remoteAddr := net.UnixAddr{Name: "/home/william/programming/ramont/unix-input-socket/src/uv.socket", Net: "Unix"}
+	path := "/home/william/programming/ramont/unix-input-socket/src/uv.socket"
+	remoteAddr := net.UnixAddr{Name: path, Net: "Unix"}
 	conn, err := d.Dial("unix", remoteAddr.String())
 	if err != nil {
 		log.Fatalf("Failed to dial: %v", err)
@@ -39,14 +40,19 @@ func unixHandler() ramont.EventHandelerFunc {
 		defer conn.Close()
 
 		writer := bufio.NewWriter(conn)
-		//reader := bufio.NewReader(conn)
 		for {
 			select {
-			case data := <-recvChan:
+			case event := <-recvChan:
 				{
-					writer.Write(data)
-					writer.Flush()
-                    log.Printf("Time: %v Writing to unix socket", time.Now())
+					if _, err := writer.Write(event); err != nil {
+						log.Println("[ERROR] Failed to write to unix socket")
+					} else {
+						//each event is seperated by a newline
+						writer.WriteByte('\n')
+						writer.Flush()
+						log.Printf("Time: %v Writing to unix socket - data: %v", time.Now(), string(event))
+					}
+					// Should the unix socket ack a read ?
 					//log.Printf("reading from unix socket")
 					//content, err := reader.ReadString('\n')
 					//log.Printf("Error[%v] Unix> %s\n", err, content)
