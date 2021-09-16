@@ -4,6 +4,7 @@
 
 #include <time.h>
 #include <uv.h>
+#include "event.h"
 
 #define SOCKET_PATH "uv.socket"
 
@@ -28,10 +29,11 @@ char *time_now() {
 }
 
 void update_mouse(uv_work_t *req) {
-  char *data = ((char *)req->data);
+  Event *e = ((Event *)req->data);
 
   char *now = time_now();
-  fprintf(stderr, "[%s] Got mouse data: %s\n", now, data);
+  fprintf(stderr, "\n[%s] Got event data\n", now);
+  print_event(e);
 
   /*double points[2] = {1.0, 2.0};
   async.data = (void *)points;
@@ -46,8 +48,9 @@ void print_mouse_change(uv_async_t *handle) {
 
 void cleanup(uv_work_t *req, int status) {
   fprintf(stderr, "cleaning up after mouse change");
-  char *data = ((char *)req->data);
-  free(data);
+  Event *e = ((Event *)req->data);
+  free_event(e);
+  free(e);
   // we should probably not clean async up here since multiple work requests
   // will use this async ? uv_close((uv_handle_t *)&async, NULL);
 }
@@ -76,8 +79,14 @@ void process_data(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf) {
       //sscanf was unable to assign data
       fprintf(stderr, "Failed to read event: '%s'\n", buf->base);
     } else if (length == nread) {
-      req.data = (void *)data;
+
+      Event* event = new_event();
+      parse_event(data, event);
+      print_event(event);
+
+      req.data = (void *)event;
       fprintf(stderr, "queueing work: %s\n", data);
+
       int r = uv_queue_work(loop, &req, update_mouse, cleanup);
       if (r != 0)
         fprintf(stderr, "failed to queue work: %d", r);
