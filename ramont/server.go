@@ -7,15 +7,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Burmudar/ramon-go/ramont/network"
-	"github.com/Burmudar/ramon-go/ramont/websockets"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
 
 var globalServerStore *serverStore
 
-type EventHandelerFunc func(ev Event) error
+type EventHandelerFunc func(event *Event) error
 
 func initServerStore() {
 	globalServerStore = &serverStore{store: make(map[uint32]Server)}
@@ -28,9 +26,9 @@ type Server interface {
 }
 
 type WebSocketServer struct {
-	id             uint32
-	transport      network.Transport
-	eventHandlerFn EventHandelerFunc
+	id            uint32
+	transport     Transport
+	dataHandlerFn DataHandelerFunc
 }
 
 type serverStore struct {
@@ -61,17 +59,27 @@ func (str *serverStore) deregister(s Server) {
 	delete(str.store, s.ID())
 }
 
-func NewWebSocketServer(conn *websocket.Conn, evHandler EventHandelerFunc) Server {
+func NewWebSocketServer(conn *websocket.Conn, handler DataHandelerFunc) Server {
 	srv := WebSocketServer{}
-	srv.transport = websockets.NewTransport(conn, srv.HandleMessage)
-	srv.eventHandlerFn = evHandler
+	srv.transport = NewWebSocketTransport(conn, srv.HandleMessage)
+	srv.dataHandlerFn = handler
 
 	return &srv
 }
 
-func EventAwareHandler(eventHandler EventHandelerFunc) func(ctx *gin.Context) {
+func dataToEventWrap(eventHandler EventHandelerFunc) DataHandelerFunc {
+	return func(dataType string, data []byte) error {
+		if event, err := processEventData(dataType, data); err != nil {
+			return nil
+		} else {
+			return eventHandler(&event)
+		}
+	}
+}
+
+func OnEventHandeler(handler EventHandelerFunc) func(ctx *gin.Context) {
 	return func(ctx *gin.Context) {
-		conn, err := websockets.UpgradeConn(ctx.Writer, ctx.Request)
+		conn, err := UpgradeConn(ctx.Writer, ctx.Request)
 		if err != nil {
 			ctx.AbortWithStatusJSON(500, struct {
 				Message string
@@ -79,7 +87,7 @@ func EventAwareHandler(eventHandler EventHandelerFunc) func(ctx *gin.Context) {
 			return
 		}
 
-		srv := NewWebSocketServer(conn, eventHandler)
+		srv := NewWebSocketServer(conn, dataToEventWrap(handler))
 
 		if globalServerStore == nil {
 			initServerStore()
@@ -90,30 +98,6 @@ func EventAwareHandler(eventHandler EventHandelerFunc) func(ctx *gin.Context) {
 
 		srv.Start()
 	}
-}
-
-type EventType string
-
-type Event interface {
-	TypeOf() EventType
-}
-
-type MouseEvent struct {
-	Type    EventType `json:"type"`
-	OffsetX float64   `json:"offsetX"`
-	OffsetY float64   `json:"offsetY"`
-}
-
-func (me *MouseEvent) TypeOf() EventType {
-	return me.Type
-}
-
-func unmarshalMouseEvent(eventType EventType, raw json.RawMessage) *MouseEvent {
-	event := MouseEvent{Type: eventType}
-	err := json.Unmarshal(raw, &event)
-	log.Printf("Unmarshall Error: %v value: %v", err, string(raw))
-
-	return &event
 }
 
 func (s *WebSocketServer) AssignID(id uint32) {
@@ -130,11 +114,8 @@ func (s *WebSocketServer) reply(msg []byte) error {
 	return nil
 }
 
-func (s *WebSocketServer) processEvent(ev *MouseEvent) ([]byte, error) {
-	if ev != nil {
-
-	}
-	err := s.eventHandlerFn(ev)
+func (s *WebSocketServer) processData(msgType string, data []byte) ([]byte, error) {
+	err := s.dataHandlerFn(msgType, data)
 	msg, _ := json.Marshal(struct {
 		Type    string `json:"type"`
 		ID      uint32 `json:"serverID"`
@@ -143,7 +124,7 @@ func (s *WebSocketServer) processEvent(ev *MouseEvent) ([]byte, error) {
 	return msg, err
 }
 
-func (s *WebSocketServer) HandleMessage(msg *network.Message) error {
+func (s *WebSocketServer) HandleMessage(msg *Message) error {
 	if msg.Error != nil {
 		log.Fatalf("Problem occured while receiving msg: %v", msg.Error)
 	}
@@ -160,38 +141,7 @@ func (s *WebSocketServer) HandleMessage(msg *network.Message) error {
 		}
 	}
 
-	var event *MouseEvent
 	switch bmsg.Type {
-	case "mouse_start":
-		{
-			event = unmarshalMouseEvent("mouse_start", msg.Data)
-			msg, err := s.processEvent(event)
-			if err != nil {
-				log.Printf("[ERROR] Problem processing event: %v", err)
-			}
-			s.reply(msg)
-		}
-		break
-	case "mouse_move":
-		{
-			event = unmarshalMouseEvent("mouse_move", msg.Data)
-			msg, err := s.processEvent(event)
-			if err != nil {
-				log.Printf("[ERROR] Problem processing event: %v", err)
-			}
-			s.reply(msg)
-		}
-		break
-	case "mouse_end":
-		{
-			event = unmarshalMouseEvent("mouse_end", msg.Data)
-			msg, err := s.processEvent(event)
-			if err != nil {
-				log.Printf("[ERROR] Problem processing event: %v", err)
-			}
-			s.reply(msg)
-		}
-		break
 	case "basic":
 		{
 			msg, _ := json.Marshal(struct {
@@ -204,7 +154,11 @@ func (s *WebSocketServer) HandleMessage(msg *network.Message) error {
 		}
 	default:
 		{
-			log.Printf("Unknown event: %v", string(msg.Data))
+			msg, err := s.processData(bmsg.Type, msg.Data)
+			if err != nil {
+				log.Printf("[ERROR] Problem processing event: %v", err)
+			}
+			s.reply(msg)
 		}
 	}
 
