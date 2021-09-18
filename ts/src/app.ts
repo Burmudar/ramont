@@ -27,7 +27,9 @@ class WebSocketClient {
         let obj = JSON.parse(msg.data);
         this.logger(`Message Received: ${msg.data}`);
         this.logger('Calling OnMessage');
-        this.OnMessage(obj);
+        if (this.OnMessage) {
+            this.OnMessage(obj);
+        }
     }
 
     handleClose():void {
@@ -41,7 +43,8 @@ class WebSocketClient {
 
     send(obj:any):void {
         let msg = JSON.stringify(obj);
-        this.logger(`Sending: ${msg}`);
+        let now = new Date()
+        this.logger(`TS: ${now.toISOString()} Sending: ${msg}`);
         this.conn.send(msg);
     }
 

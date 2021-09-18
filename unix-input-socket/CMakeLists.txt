@@ -11,6 +11,8 @@ add_subdirectory(src)
 if(TARGET_GROUP STREQUAL release)
     # release things
     add_executable(input-socket src/unix_socket.c)
+    add_executable(uv_socket src/uv_socket.c src/event.h src/event.c)
+    target_link_libraries(uv_socket -luv -lcjson)
 #add_executable(input-socket src/queue_test.c src/queue.h)
 elseif(TARGET_GROUP STREQUAL test)
     enable_testing()

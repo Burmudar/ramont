@@ -1,15 +1,15 @@
-package websockets
+package ramont
 
 import (
 	"fmt"
 	"log"
 	"net/http"
 
-	"github.com/Burmudar/ramon-go/ramont/network"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
 
+type DataHandelerFunc func(dataType string, data []byte) error
 type WebSocketContext struct {
 	gin.Context
 	Ws *websocket.Conn
@@ -25,23 +25,23 @@ func AllOriginValid(r *http.Request) bool {
 
 type WebSocketTransport struct {
 	conn       *websocket.Conn
-	recvChan   chan *network.Message
+	recvChan   chan *Message
 	sendChan   chan []byte
 	closeChan  chan bool
-	MsgHandler network.MsgHandler
+	MsgHandler MsgHandler
 }
 
-func NewTransport(conn *websocket.Conn, msgHandler network.MsgHandler) network.Transport {
+func NewWebSocketTransport(conn *websocket.Conn, msgHandler MsgHandler) Transport {
 	return &WebSocketTransport{
 		conn:       conn,
-		recvChan:   make(chan *network.Message, 1),
+		recvChan:   make(chan *Message, 1),
 		closeChan:  make(chan bool),
 		sendChan:   make(chan []byte),
 		MsgHandler: msgHandler,
 	}
 }
 
-func DefaultMsgHandler(msg *network.Message) error {
+func DefaultMsgHandler(msg *Message) error {
 	log.Printf("[DEFAULT TEXT HANDLER] Received Text message: %v", msg)
 	return nil
 }
@@ -72,7 +72,7 @@ func UpgradeConn(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error
 
 //This should probably be moved out
 /*
-func HandlerFunc(msgHandler network.MsgHandler) gin.HandlerFunc {
+func HandlerFunc(msgHandler MsgHandler) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		t := NewTransport(nil, msgHandler)
 		wsTransport, _ := t.(*WebSocketTransport)
@@ -97,10 +97,12 @@ func (srv *WebSocketTransport) Close() {
 
 }
 
-func (t *WebSocketTransport) Listen() {
+func (t *WebSocketTransport) Listen() error {
 	go t.receiveMessages()
 	go t.writeMessages()
 	go t.processMessages()
+
+	return nil
 }
 
 func (srv *WebSocketTransport) Send(msg []byte) {
@@ -147,7 +149,7 @@ func (t *WebSocketTransport) receiveMessages() {
 					fallthrough
 				case websocket.BinaryMessage:
 					{
-						t.recvChan <- &network.Message{uint8(msgType), data, err}
+						t.recvChan <- &Message{uint8(msgType), data, err}
 					}
 					break
 				case websocket.PingMessage, websocket.PongMessage:
