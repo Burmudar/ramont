@@ -1,83 +1,39 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
-	"fmt"
-	"log"
-	"net"
-	"time"
 
 	"github.com/Burmudar/ramon-go/ramont"
 	"github.com/gin-gonic/gin"
-	"github.com/go-vgo/robotgo"
 )
 
-func screenshotOnMac() {
-	//robotgo.ScrollMouse(10, "up")
-	//robotgo.MouseClick("left", true)
-	robotgo.KeyTap("cmd")
-	robotgo.Sleep(5)
-	//GOTCHA: Key combinations have to be done in REVERSE order like below
-	robotgo.KeyTap("4", "shift", "cmd")
-	//robotgo.MoveMouse(100, 200) // 1.0, 100.0)
-	robotgo.Sleep(55)
-}
-
-func unixHandler() ramont.EventHandelerFunc {
-	var d net.Dialer
-
-	path := "/home/william/programming/ramont/unix-input-socket/src/uv.socket"
-	remoteAddr := net.UnixAddr{Name: path, Net: "Unix"}
-	conn, err := d.Dial("unix", remoteAddr.String())
+func handleEvent(transport *ramont.UnixTransport, ev ramont.Event) error {
+	d, err := json.Marshal(ev)
 	if err != nil {
-		log.Fatalf("Failed to dial: %v", err)
+		return err
 	}
 
-	unixEventSendChan := make(chan []byte, 1)
+	transport.Send(d)
 
-	go func(recvChan chan []byte) {
-		defer conn.Close()
+	return nil
+}
 
-		writer := bufio.NewWriter(conn)
-		for {
-			select {
-			case event := <-recvChan:
-				{
-					if _, err := writer.Write(event); err != nil {
-						log.Println("[ERROR] Failed to write to unix socket")
-					} else {
-						//each event is seperated by a newline
-						writer.WriteByte('\n')
-						writer.Flush()
-						log.Printf("Time: %v Writing to unix socket - data: %v", time.Now(), string(event))
-					}
-					// Should the unix socket ack a read ?
-					//log.Printf("reading from unix socket")
-					//content, err := reader.ReadString('\n')
-					//log.Printf("Error[%v] Unix> %s\n", err, content)
-				}
-			}
-		}
-	}(unixEventSendChan)
+func EventHandler() ramont.EventHandelerFunc {
+
+	path := "/home/william/programming/ramont/unix-input-socket/_builds/uv.socket"
+	//path := "/home/william/programming/ramont/unix-input-socket/src/uv.socket"
+
+	transport := ramont.NewUnixTransport(path)
 
 	return func(ev ramont.Event) error {
-
-		d, err := json.Marshal(ev)
-		if err != nil {
-			return err
-		}
-
-		unixEventSendChan <- d
-
-		return nil
+		return handleEvent(transport, ev)
 	}
 }
 
 func start() {
 	r := gin.Default()
 
-	r.GET("/ws", ramont.EventAwareHandler(unixHandler()))
+	r.GET("/ws", ramont.EventAwareHandler(EventHandler()))
 
 	r.Static("static", "static")
 	r.LoadHTMLFiles("static/index.html")
@@ -93,42 +49,6 @@ func start() {
 	r.Run() // listen and serve on 0.0.0.0:8080 (for windows "localhost:8080")
 }
 
-func unix() {
-
-	count := 0
-	var d net.Dialer
-
-	remoteAddr := net.UnixAddr{Name: "/home/william/programming/virtual-mouse/echo_socket", Net: "Unix"}
-	conn, err := d.Dial("unix", remoteAddr.String())
-	if err != nil {
-		log.Fatalf("Failed to dial: %v", err)
-	}
-
-	writer := bufio.NewWriter(conn)
-	reader := bufio.NewReader(conn)
-
-	for count != 100 {
-
-		count++
-		data := fmt.Sprintf("%d\n", count)
-		fmt.Printf("us>%s", data)
-
-		if _, err := writer.WriteString(data); err != nil {
-			log.Fatal(err)
-		}
-		writer.Flush()
-		log.Println("Flushed.")
-
-		if data, err := reader.ReadBytes('\n'); err != nil {
-			log.Fatal(err)
-		} else {
-			log.Printf("them> %s", string(data))
-		}
-	}
-
-}
-
 func main() {
 	start()
-	//unix()
 }

@@ -130,18 +130,17 @@ func (s *WebSocketServer) reply(msg []byte) error {
 	return nil
 }
 
-func (s *WebSocketServer) processEvent(ev *MouseEvent) error {
+func (s *WebSocketServer) processEvent(ev *MouseEvent) ([]byte, error) {
 	if ev != nil {
-		s.eventHandlerFn(ev)
-		msg, _ := json.Marshal(struct {
-			Type    string `json:"type"`
-			ID      uint32 `json:"serverID"`
-			Message string `json:"message"`
-		}{"control", s.id, "received"})
 
-		s.reply(msg)
 	}
-	return nil
+	err := s.eventHandlerFn(ev)
+	msg, _ := json.Marshal(struct {
+		Type    string `json:"type"`
+		ID      uint32 `json:"serverID"`
+		Message string `json:"message"`
+	}{"control", s.id, "received"})
+	return msg, err
 }
 
 func (s *WebSocketServer) HandleMessage(msg *network.Message) error {
@@ -154,10 +153,11 @@ func (s *WebSocketServer) HandleMessage(msg *network.Message) error {
 	err := json.Unmarshal(d, &bmsg)
 	if err != nil {
 		if string(msg.Data) == "ping" {
+		} else {
+			t := time.Now()
+			log.Printf("Time: %v Error handling message - Unmarshall Error: '%v' Data: %v", t, err, string(msg.Data))
+			return err
 		}
-        t := time.Now()
-        log.Printf("Time: %v Error handling message - Unmarshall Error: '%v' Data: %v", t, err, string(msg.Data))
-		return err
 	}
 
 	var event *MouseEvent
@@ -165,16 +165,31 @@ func (s *WebSocketServer) HandleMessage(msg *network.Message) error {
 	case "mouse_start":
 		{
 			event = unmarshalMouseEvent("mouse_start", msg.Data)
+			msg, err := s.processEvent(event)
+			if err != nil {
+				log.Printf("[ERROR] Problem processing event: %v", err)
+			}
+			s.reply(msg)
 		}
 		break
 	case "mouse_move":
 		{
 			event = unmarshalMouseEvent("mouse_move", msg.Data)
+			msg, err := s.processEvent(event)
+			if err != nil {
+				log.Printf("[ERROR] Problem processing event: %v", err)
+			}
+			s.reply(msg)
 		}
 		break
 	case "mouse_end":
 		{
 			event = unmarshalMouseEvent("mouse_end", msg.Data)
+			msg, err := s.processEvent(event)
+			if err != nil {
+				log.Printf("[ERROR] Problem processing event: %v", err)
+			}
+			s.reply(msg)
 		}
 		break
 	case "basic":
@@ -185,15 +200,13 @@ func (s *WebSocketServer) HandleMessage(msg *network.Message) error {
 				Message string `json:"message"`
 			}{"control", s.id, "pong"})
 
-			s.transport.Send(msg)
+			s.reply(msg)
 		}
 	default:
 		{
 			log.Printf("Unknown event: %v", string(msg.Data))
 		}
 	}
-
-	s.processEvent(event)
 
 	return err
 }
