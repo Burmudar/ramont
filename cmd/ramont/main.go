@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func handleEvent(transport *ramont.UnixTransport, ev ramont.Event) error {
+func handleEvent(transport ramont.Transport, ev *ramont.Event) error {
 	d, err := json.Marshal(ev)
 	if err != nil {
 		return err
@@ -18,14 +18,14 @@ func handleEvent(transport *ramont.UnixTransport, ev ramont.Event) error {
 	return nil
 }
 
-func EventHandler() ramont.EventHandelerFunc {
+func OnEvent() ramont.EventHandelerFunc {
 
 	path := "/home/william/programming/ramont/unix-input-socket/_builds/uv.socket"
 	//path := "/home/william/programming/ramont/unix-input-socket/src/uv.socket"
 
 	transport := ramont.NewUnixTransport(path)
 
-	return func(ev ramont.Event) error {
+	return func(ev *ramont.Event) error {
 		return handleEvent(transport, ev)
 	}
 }
@@ -33,7 +33,7 @@ func EventHandler() ramont.EventHandelerFunc {
 func start() {
 	r := gin.Default()
 
-	r.GET("/ws", ramont.EventAwareHandler(EventHandler()))
+	r.GET("/ws", ramont.OnEventHandeler(OnEvent()))
 
 	r.Static("static", "static")
 	r.LoadHTMLFiles("static/index.html")
