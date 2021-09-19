@@ -2,12 +2,16 @@ package main
 
 import (
 	"encoding/json"
+	"log"
+	"os"
+	"path"
 
 	"github.com/Burmudar/ramon-go/ramont"
 	"github.com/gin-gonic/gin"
 )
 
 func handleEvent(transport ramont.Transport, ev *ramont.Event) error {
+	log.Printf("Handling event -> %v", ev)
 	d, err := json.Marshal(ev)
 	if err != nil {
 		return err
@@ -25,6 +29,11 @@ func OnEvent() ramont.EventHandelerFunc {
 
 	transport := ramont.NewUnixTransport(path)
 
+	err := transport.Listen()
+	if err != nil {
+		log.Fatalf("[ERROR] Unix Transport listening failure: %v", err)
+	}
+
 	return func(ev *ramont.Event) error {
 		return handleEvent(transport, ev)
 	}
@@ -35,8 +44,9 @@ func start() {
 
 	r.GET("/ws", ramont.OnEventHandeler(OnEvent()))
 
-	r.Static("static", "static")
-	r.LoadHTMLFiles("static/index.html")
+	p := path.Join(os.Getenv("RAMONT_STATIC"), "index.html")
+	r.Static("static", os.Getenv("RAMONT_STATIC"))
+	r.LoadHTMLFiles(p)
 	r.GET("/", func(ctx *gin.Context) {
 		ctx.HTML(200, "index.html", nil)
 	})

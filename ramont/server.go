@@ -154,10 +154,12 @@ func (s *WebSocketServer) HandleMessage(msg *Message) error {
 		}
 	default:
 		{
+			log.Printf("[INFO] Processing '%s' data", bmsg.Type)
 			msg, err := s.processData(bmsg.Type, msg.Data)
 			if err != nil {
 				log.Printf("[ERROR] Problem processing event: %v", err)
 			}
+			log.Printf("[INFO] Replying -> %v", msg)
 			s.reply(msg)
 		}
 	}

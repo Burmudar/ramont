@@ -1,15 +1,34 @@
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 #include <time.h>
-#include <uv.h>
+
 #include "event.h"
+#include <X11/Xlib.h>
+#include <libevdev/libevdev-uinput.h>
+#include <libevdev/libevdev.h>
+#include <linux/uinput.h>
+#include <uv.h>
 
 #define SOCKET_PATH "uv.socket"
 
 uv_loop_t *loop;
 uv_async_t async;
+short dimensions[2];
+
+struct uinput_setup usetup;
+struct libevdev *dev;
+struct libevdev_uinput *uidev;
+int fd;
+int ufd;
+
+void load_dimensions(short dimensions[]) {
+  Display *display = XOpenDisplay(NULL);
+  Screen *screen = DefaultScreenOfDisplay(display);
+  dimensions[0] = screen->width;
+  dimensions[1] = screen->height;
+}
 
 long current_millis() {
   struct timeval time;
@@ -28,12 +47,23 @@ char *time_now() {
   return buff;
 }
 
-void update_mouse(uv_work_t *req) {
+void move_mouse(Coord *coord) {
+  libevdev_uinput_write_event(uidev, EV_ABS, ABS_X, coord->x);
+  libevdev_uinput_write_event(uidev, EV_ABS, ABS_Y, coord->y);
+  libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 5);
+  sleep(1);
+}
+
+void process_event(uv_work_t *req) {
   Event *e = ((Event *)req->data);
 
   char *now = time_now();
   fprintf(stderr, "\n[%s] Got event data\n", now);
   print_event(e);
+
+  Coord coord = translate_event_coord(e, dimensions[0], dimensions[1]);
+  print_coord(&coord);
+  move_mouse(&coord);
 
   /*double points[2] = {1.0, 2.0};
   async.data = (void *)points;
@@ -57,7 +87,8 @@ void cleanup(uv_work_t *req, int status) {
 
 void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
   // TODO: Need to look in reusing buffers
-  // calloc zeroes out memory, if we use malloc there is left over garbage memory like trailing  '}'
+  // calloc zeroes out memory, if we use malloc there is left over garbage
+  // memory like trailing  '}'
   buf->base = calloc(suggested_size, sizeof(char));
   buf->len = suggested_size;
 }
@@ -74,26 +105,29 @@ void process_data(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf) {
     int n = sscanf(buf->base, "%[^\n]", data);
     int length = strlen(data) + 1; // plus 1 for \0
 
-    // n is the number of arguments sscanf was able to assign, since we only have one, it should be 0 / 1
+    // n is the number of arguments sscanf was able to assign, since we only
+    // have one, it should be 0 / 1
     if (n == 0) {
-      //sscanf was unable to assign data
+      // sscanf was unable to assign data
       fprintf(stderr, "Failed to read event: '%s'\n", buf->base);
     } else if (length == nread) {
 
-      Event* event = new_event();
+      Event *event = new_event();
       parse_event(data, event);
       print_event(event);
 
       req.data = (void *)event;
       fprintf(stderr, "queueing work: %s\n", data);
 
-      int r = uv_queue_work(loop, &req, update_mouse, cleanup);
+      int r = uv_queue_work(loop, &req, process_event, cleanup);
       if (r != 0)
         fprintf(stderr, "failed to queue work: %d", r);
     }
     if (length < nread) {
-      // since there are more events, we should read the events here and add the events to an array?
-      fprintf(stderr, "[WARNING] More than one event in stream - only read first\n");
+      // since there are more events, we should read the events here and add the
+      // events to an array?
+      fprintf(stderr,
+              "[WARNING] More than one event in stream - only read first\n");
       fprintf(stderr, "Data: '%s'\n", buf->base);
     }
   }
@@ -125,14 +159,39 @@ void on_new_connection(uv_stream_t *server, int status) {
   }
 }
 
-void remove_sock(int sig) {
+void remove_sock() {
   uv_fs_t req;
 
   uv_fs_unlink(loop, &req, SOCKET_PATH, NULL);
+}
+
+void clean_evdev() {
+  libevdev_uinput_destroy(uidev);
+  libevdev_free(dev);
+  close(fd);
+  close(ufd);
+}
+
+void clean(int sig) {
+  remove_sock();
+  clean_evdev();
+
   exit(0);
 }
 
 int main() {
+  // TODO: Check that we're sudo
+  // TODO: Read this from cmd line
+  fd = open("/dev/input/event2", O_WRONLY | O_NONBLOCK);
+  ufd = open("/dev/uinput", O_RDWR);
+
+  libevdev_new_from_fd(fd, &dev);
+  libevdev_uinput_create_from_device(dev, ufd, &uidev);
+
+  sleep(1);
+
+  load_dimensions(dimensions);
+  fprintf(stderr, "\nWidth: %hd Height: %hd\n", dimensions[0], dimensions[1]);
 
   loop = uv_default_loop();
 
@@ -141,7 +200,7 @@ int main() {
   uv_pipe_t server;
   uv_pipe_init(loop, &server, 0);
 
-  signal(SIGINT, remove_sock);
+  signal(SIGINT, clean);
 
   int r;
   if ((r = uv_pipe_bind(&server, SOCKET_PATH))) {
@@ -152,6 +211,5 @@ int main() {
     fprintf(stderr, "Listen error: %s\n", uv_err_name(r));
     return 2;
   }
-
   return uv_run(loop, UV_RUN_DEFAULT);
 }

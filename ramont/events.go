@@ -12,9 +12,9 @@ type Event interface {
 }
 
 type MouseEvent struct {
-	Type    EventType `json:"type"`
-	OffsetX float64   `json:"offsetX"`
-	OffsetY float64   `json:"offsetY"`
+	Type  EventType `json:"type"`
+	UnitX float64   `json:"unitX"`
+	UnitY float64   `json:"unitY"`
 }
 
 func (me *MouseEvent) TypeOf() EventType {
@@ -24,13 +24,14 @@ func (me *MouseEvent) TypeOf() EventType {
 func unmarshalMouseEvent(eventType EventType, raw json.RawMessage) *MouseEvent {
 	event := MouseEvent{Type: eventType}
 	err := json.Unmarshal(raw, &event)
-	log.Printf("Unmarshall Error: %v value: %v", err, string(raw))
+	if err != nil {
+		log.Printf("[ERROR] Unmarshall Error: %v value: %v", err, string(raw))
+	}
 
 	return &event
 }
 
 func processEventData(eventType string, data []byte) (Event, error) {
-    event := unmarshalMouseEvent(EventType(eventType), data)
-    return event, nil
+	event := unmarshalMouseEvent(EventType(eventType), data)
+	return event, nil
 }
-
