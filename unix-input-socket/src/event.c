@@ -17,7 +17,7 @@ void free_event(Event* e) {
 }
 
 void print_event(Event* e) {
-    fprintf(stderr, "\n---- Event ----\ntype: %s\noffsetX: %5.16f\noffsetY: %5.16f\n\n", e->type, e->offsetX, e->offsetY);
+    fprintf(stderr, "\n---- Event ----\ntype: %s\nunit_x: %5.16f\nunit_y: %5.16f\n\n", e->type, e->unit_x, e->unit_y);
 }
 
 int parse_event(char* data, Event* dst) {
@@ -29,15 +29,26 @@ int parse_event(char* data, Event* dst) {
         strcpy(dst->type, type->valuestring);
     }
 
-    cJSON *x = cJSON_GetObjectItemCaseSensitive(json, "offsetX");
+    cJSON *x = cJSON_GetObjectItemCaseSensitive(json, "unitX");
     if (cJSON_IsNumber(x) && (x->valuedouble)) {
-        dst->offsetX = x->valuedouble;
+        dst->unit_x = x->valuedouble;
     }
 
-    cJSON *y = cJSON_GetObjectItemCaseSensitive(json, "offsetY");
+    cJSON *y = cJSON_GetObjectItemCaseSensitive(json, "unitY");
     if (cJSON_IsNumber(y) && (y->valuedouble)) {
-        dst->offsetY = y->valuedouble;
+        dst->unit_y = y->valuedouble;
     }
 
     return 0;
+}
+
+Coord translate_event_coord(Event *event, short width, short height) {
+    Coord coord;
+    coord.x = event->unit_x * width;
+    coord.y = event->unit_y * height;
+    return coord;
+}
+
+void print_coord(Coord* coord) {
+    fprintf(stderr, "translated: { %5.16f, %5.16f }\n", coord->x, coord->y);
 }

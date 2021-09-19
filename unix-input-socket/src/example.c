@@ -15,7 +15,7 @@ int main(void) {
 
   int i = 50;
 
-  int fd = open("/dev/input/event2", O_WRONLY | O_NONBLOCK);
+  int fd = open("/dev/input/event3", O_WRONLY | O_NONBLOCK);
   int ufd = open("/dev/uinput", O_RDWR);
 
   libevdev_new_from_fd(fd, &dev);

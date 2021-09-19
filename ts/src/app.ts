@@ -71,8 +71,8 @@ enum MoveEventType {
 
 class MoveEventMessage {
     type:MoveEventType
-    offsetX: number
-    offsetY: number
+    unitX: number
+    unitY: number
     static readonly eventMap:Map<string, MoveEventType> = new Map([
             [EventType.MouseDown, MoveEventType.MouseStart],
             [EventType.MouseMove, MoveEventType.MouseMove],
@@ -84,15 +84,15 @@ class MoveEventMessage {
 
     constructor(type:MoveEventType, X:number, Y:number){
         this.type = type;
-        this.offsetX = X;
-        this.offsetY = Y;
+        this.unitX = X;
+        this.unitY = Y;
     }
 
-    static from(e:MouseEvent, xOffset = 0, yOffset = 0):MoveEventMessage {
+    static from(e:MouseEvent, width:number, height:number):MoveEventMessage {
         return new MoveEventMessage(
             MoveEventMessage.resolveEventType(e.type),
-            e.offsetX - xOffset,
-            e.offsetY - yOffset
+            e.offsetX / width,
+            e.offsetY / height
         );
     }
 
@@ -102,6 +102,7 @@ class MoveEventMessage {
         for(var i = 0; i < e.changedTouches.length; i++) {
             let msg = new MoveEventMessage(
                 eventType,
+                // TODO: Do we need to do this for touch events ?
                 e.changedTouches[i].clientX - xOffset,
                 e.changedTouches[i].clientY - yOffset
             );
@@ -131,10 +132,10 @@ class TrackpadListener {
 
     registerMouseListeners():void {
         let rect = this.domEL.getBoundingClientRect();
-        let xOffset = rect.x;
-        let yOffset = rect.y;
+        let width = rect.width;
+        let height = rect.height;
         let eventFn = (event:MouseEvent) => {
-            let msg = MoveEventMessage.from(event, xOffset, yOffset);
+            let msg = MoveEventMessage.from(event, width, height);
             this.onEvent(msg, this.dragging)
         }
 

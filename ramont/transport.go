@@ -50,6 +50,7 @@ func (u *UnixTransport) Close() {
 }
 
 func (u *UnixTransport) Send(data []byte) {
+	log.Printf("[DEBUG] Sending event data to -> %s", u.Path)
 	u.socketCh <- data
 }
 
@@ -66,7 +67,7 @@ func (u *UnixTransport) processChan(recvChan chan []byte) {
 					//each event is seperated by a newline
 					writer.WriteByte('\n')
 					writer.Flush()
-					log.Printf("Time: %v Writing to unix socket - data: %v", time.Now(), string(data))
+					log.Printf("[DEBUG] Time: %v Writing to unix socket - data: %v", time.Now(), string(data))
 				}
 				// Should the unix socket ack a read ?
 				//log.Printf("reading from unix socket")
@@ -98,6 +99,8 @@ func (u *UnixTransport) Listen() error {
 
 	u.doneCh = make(chan bool)
 	u.socketCh = u.startListener()
+
+	log.Printf("[DEBUG] Started Unix Listener")
 
 	return nil
 

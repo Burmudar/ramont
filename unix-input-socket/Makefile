@@ -4,7 +4,7 @@ build:
 
 release:
 	cmake -B_builds -DTARGET_GROUP=release
-	cmake --build _builds
+	cmake --build _builds --verbose
 
 clean:
 	rm -rf _builds
