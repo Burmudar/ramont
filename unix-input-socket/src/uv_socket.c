@@ -182,6 +182,7 @@ void clean(int sig) {
 int main() {
   // TODO: Check that we're sudo
   // TODO: Read this from cmd line
+  // TODO: Maybe use this `cat /proc/bus/input/devices` to find the right input device
   fd = open("/dev/input/event2", O_WRONLY | O_NONBLOCK);
   ufd = open("/dev/uinput", O_RDWR);
 
