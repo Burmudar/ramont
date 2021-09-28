@@ -12,23 +12,36 @@
 
 #include "path.h"
 
-int main(void) {
-  path_result_t *result = find_in_path("/dev/input/by-path", ".+-event-mouse$");
-  if (result->error == 0) {
-    fprintf(stderr, "Found! At: %s\n", result->path);
-  } else {
-    fprintf(stderr, "Uh oh! Error!");
-  }
+int main(int argc, char **argv) {
+  char* path = NULL;
 
+  printf("Args: %d\n", argc);
+
+  if (argc == 1) {
+    path_list_t *result =
+        find_all_in_path("/dev/input/by-path", ".+-event-mouse$");
+    if (result->error == 0) {
+      fprintf(stderr, "Found stuff!\n");
+    } else {
+      fprintf(stderr, "Uh oh! Error!");
+    }
+    for(int i =0; i < result->length; i++) {
+        fprintf(stderr, "Path=%s\n", result->paths[i]);
+    }
+    free_path_list(result);
+  } else {
+    path = argv[1];
+  }
 
   struct libevdev *dev;
   struct libevdev_uinput *uidev;
 
   int i = 50;
 
-  int fd = open(result->path, O_RDWR | O_NONBLOCK);
+  int fd = open(path, O_RDWR | O_NONBLOCK);
   if (fd < 0) {
-    fprintf(stderr, "File - failed to open '%s': %s", result->path, strerror(fd));
+    fprintf(stderr, "File - failed to open '%s': %s", path,
+            strerror(fd));
   }
 
   int rc = libevdev_new_from_fd(fd, &dev);
@@ -57,7 +70,6 @@ int main(void) {
 
   sleep(1);
 
-  free_path_result(result);
   libevdev_uinput_destroy(uidev);
   libevdev_free(dev);
   close(fd);
