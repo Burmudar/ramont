@@ -22,10 +22,7 @@ func handleEvent(transport ramont.Transport, ev *ramont.Event) error {
 	return nil
 }
 
-func OnEvent() ramont.EventHandelerFunc {
-
-	path := "/home/william/programming/ramont/unix-input-socket/_builds/uv.socket"
-	//path := "/home/william/programming/ramont/unix-input-socket/src/uv.socket"
+func OnEvent(path string) ramont.EventHandelerFunc {
 
 	transport := ramont.NewUnixTransport(path)
 
@@ -39,10 +36,10 @@ func OnEvent() ramont.EventHandelerFunc {
 	}
 }
 
-func start() {
+func start(onEvent ramont.EventHandelerFunc) {
 	r := gin.Default()
 
-	r.GET("/ws", ramont.OnEventHandeler(OnEvent()))
+	r.GET("/ws", ramont.OnEventHandeler(onEvent))
 
 	p := path.Join(os.Getenv("RAMONT_STATIC"), "index.html")
 	r.Static("static", os.Getenv("RAMONT_STATIC"))
@@ -60,5 +57,11 @@ func start() {
 }
 
 func main() {
-	start()
+    if len(os.Args) == 1 {
+        log.Panicln("Missing argument: unix socket path")
+    }
+
+    eventHandler := OnEvent(os.Args[1])
+
+	start(eventHandler)
 }

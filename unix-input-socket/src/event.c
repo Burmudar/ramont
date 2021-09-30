@@ -13,7 +13,15 @@ Event* new_event() {
 }
 
 void free_event(Event* e) {
-    free(e->type);
+    if (e != NULL) {
+        return;
+    }
+
+    if (e->type != NULL) {
+        free(e->type);
+    }
+
+    free(e);
 }
 
 void print_event(Event* e) {
@@ -44,8 +52,20 @@ int parse_event(char* data, Event* dst) {
 
 Coord translate_event_coord(Event *event, short width, short height) {
     Coord coord;
-    coord.x = event->unit_x * width;
-    coord.y = event->unit_y * height;
+    double dx = event->unit_x * width;
+    double dy = event->unit_y * height;
+
+    coord.x = dx;
+    coord.y = dy;
+    return coord;
+}
+
+Coord delta_coord(Coord main, Coord last) {
+    Coord coord;
+
+    coord.x = main.x - last.x;
+    coord.y = main.y - last.y;
+
     return coord;
 }
 

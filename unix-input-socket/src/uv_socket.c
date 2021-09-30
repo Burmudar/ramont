@@ -19,6 +19,7 @@ uv_loop_t *loop;
 uv_async_t async;
 short dimensions[2];
 
+Coord last_coord;
 struct uinput_setup usetup;
 struct libevdev *dev;
 struct libevdev_uinput *uidev;
@@ -50,10 +51,11 @@ char *time_now() {
 }
 
 void move_mouse(Coord *coord) {
-  libevdev_uinput_write_event(uidev, EV_ABS, ABS_X, coord->x);
-  libevdev_uinput_write_event(uidev, EV_ABS, ABS_Y, coord->y);
-  libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 5);
-  sleep(1);
+  libevdev_uinput_write_event(uidev, EV_REL, REL_X, coord->x);
+  libevdev_uinput_write_event(uidev, EV_REL, REL_Y, coord->y);
+  libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 0);
+  usleep(7000);
+  fprintf(stderr, "Moved mouse - x: %5.16f y: %5.16f\n", coord->x, coord->y);
 }
 
 void process_event(uv_work_t *req) {
@@ -63,9 +65,14 @@ void process_event(uv_work_t *req) {
   fprintf(stderr, "\n[%s] Got event data\n", now);
   print_event(e);
 
-  Coord coord = translate_event_coord(e, dimensions[0], dimensions[1]);
-  print_coord(&coord);
-  move_mouse(&coord);
+  Coord mouse_coords = translate_event_coord(e, dimensions[0], dimensions[1]);
+
+  Coord move_coord = delta_coord(mouse_coords, last_coord);
+
+  print_coord(&mouse_coords);
+  move_mouse(&move_coord);
+
+  last_coord = mouse_coords;
 
   /*double points[2] = {1.0, 2.0};
   async.data = (void *)points;
@@ -81,8 +88,10 @@ void print_mouse_change(uv_async_t *handle) {
 void cleanup(uv_work_t *req, int status) {
   fprintf(stderr, "cleaning up after mouse change");
   Event *e = ((Event *)req->data);
-  free_event(e);
-  free(e);
+  if (e != NULL) {
+      free_event(e);
+  }
+  //free(e);
   // we should probably not clean async up here since multiple work requests
   // will use this async ? uv_close((uv_handle_t *)&async, NULL);
 }
@@ -271,8 +280,6 @@ int main(int argc, char **argv) {
   init_input_device(path);
 
   // So when should we free path <_<
-
-  sleep(1);
 
   load_dimensions(dimensions);
   fprintf(stderr, "\nWidth: %hd Height: %hd\n", dimensions[0], dimensions[1]);

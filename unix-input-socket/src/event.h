@@ -26,4 +26,5 @@ void print_event(Event* e);
 int parse_event(char* data, Event* dst);
 
 Coord translate_event_coord(Event* event, short width, short height);
+Coord delta_coord(Coord value, Coord last);
 void print_coord(Coord* coord);
