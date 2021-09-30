@@ -34,11 +34,11 @@ path_list_t *find_all_in_path(char *path, char *pattern) {
   }
 
   while ((dir = readdir(d)) != NULL) {
-    printf("%s ...\n", dir->d_name);
 
     int reti = regexec(&regex, dir->d_name, 0, NULL, 0);
     if (!reti) {
       result[count] = malloc(sizeof(char) * (strlen(path) + strlen(dir->d_name) + 2));
+      // build and assign the full path!
       sprintf(result[count], "%s/%s", path, dir->d_name);
 
       count++;
