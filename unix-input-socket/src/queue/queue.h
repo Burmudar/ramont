@@ -2,7 +2,7 @@
 #define HEADER_FILE
 #include <sys/queue.h>
 typedef struct entry {
-  int data;
+  void* data;
   TAILQ_ENTRY(entry) entries;
 } entry;
 
@@ -16,6 +16,6 @@ typedef struct queue {
 } queue;
 
 queue *new_queue();
-void enqueue(struct queue *q, int data);
-int dequeue(struct queue *q);
+void enqueue(struct queue *q, void* data);
+void* dequeue(struct queue *q);
 #endif

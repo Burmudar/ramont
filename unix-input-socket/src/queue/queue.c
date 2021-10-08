@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include "queue.h"
 
-void enqueue(struct queue *q, int val) {
+void enqueue(struct queue *q, void* val) {
     struct entry *n = malloc(sizeof(struct entry));
 
     n->data = val;
@@ -14,9 +14,9 @@ void enqueue(struct queue *q, int val) {
     q->size++;
 }
 
-int dequeue(struct queue *q) {
+void* dequeue(struct queue *q) {
     struct entry *item = TAILQ_FIRST(&q->head);
-    int result = item->data;
+    void* result = item->data;
 
     TAILQ_REMOVE(&q->head, item, entries);
     q->size--;

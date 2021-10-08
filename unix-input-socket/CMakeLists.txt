@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 include(CMakePrintHelpers)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g")
 
 project(input-socket VERSION 0.1 DESCRIPTION "Unix Socket listening for Events" LANGUAGES C)
 
@@ -11,14 +12,12 @@ find_package(PkgConfig REQUIRED)
 
 set(TARGET_GROUP production CACHE STRING "Build?")
 
-
 add_subdirectory(src)
-
 
 if(TARGET_GROUP STREQUAL release)
     # release things
     # Ahem, I believe there is better way than just this ever expanding long list of extra c files
-    add_executable(uv_socket src/uv_socket.c src/event.h src/event.c src/path.h src/path.c)
+    add_executable(uv_socket src/uv_socket.c src/path/path.c src/path/path.h src/event/event.h src/event/event.c src/queue/queue.h src/queue/queue.c)
 
     pkg_check_modules(LIBX11 REQUIRED x11)
     set(RAMONT_LIBS "${LIBX11_LIBRARIES}")
@@ -41,7 +40,7 @@ if(TARGET_GROUP STREQUAL release)
     list(APPEND RAMONT_INCLUDE_DIRS "${LIBUV_INCLUDE_DIRS}")
 
     include_directories(uv_socket PRIVATE "${RAMONT_INCLUDE_DIRS}")
-    target_link_libraries(uv_socket "${RAMONT_LIBS}")
+    target_link_libraries(uv_socket PUBLIC "${RAMONT_LIBS}")
     target_compile_options(uv_socket PRIVATE "${RAMONT_FLAGS}")
 
 

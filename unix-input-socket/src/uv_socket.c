@@ -4,8 +4,9 @@
 #include <string.h>
 #include <time.h>
 
-#include "event.h"
-#include "path.h"
+#include "event/event.h"
+#include "path/path.h"
+#include "queue/queue.h"
 #include <X11/Xlib.h>
 #include <libevdev/libevdev-uinput.h>
 #include <libevdev/libevdev.h>
@@ -14,6 +15,11 @@
 
 #define SOCKET_PATH "uv.socket"
 #define DEVICES_SCAN_PATH "/dev/input/by-path"
+
+typedef struct lock_queue {
+    uv_mutex_t* lock;
+    queue* queue;
+} lock_queue;
 
 uv_loop_t *loop;
 uv_async_t async;
@@ -25,6 +31,46 @@ struct libevdev *dev;
 struct libevdev_uinput *uidev;
 int fd;
 int ufd;
+lock_queue* lqueue;
+
+lock_queue* new_lock_queue() {
+    lock_queue* lq = malloc(sizeof(lock_queue));
+
+    uv_mutex_t lock;
+
+    uv_mutex_init(&lock);
+
+    lq->lock = &lock;
+    lq->queue = new_queue();
+
+    return lq;
+}
+
+void free_lock_queue(lock_queue* q) {
+    uv_mutex_lock(q->lock);
+    free(q->queue);
+    uv_mutex_unlock(q->lock);
+    uv_mutex_destroy(q->lock);
+    free(q);
+}
+
+void q_event(lock_queue* lq, Event* ev) {
+    uv_mutex_lock(lq->lock);
+
+    enqueue(lq->queue, (void*) ev);
+
+    uv_mutex_unlock(lq->lock);
+}
+
+Event* deq_event(lock_queue* lq) {
+    uv_mutex_lock(lq->lock);
+
+    Event* ev = (Event*)dequeue(lq->queue);
+
+    uv_mutex_unlock(lq->lock);
+
+    return ev;
+}
 
 void load_dimensions(short dimensions[]) {
   Display *display = XOpenDisplay(NULL);
@@ -59,7 +105,8 @@ void move_mouse(Coord *coord) {
 }
 
 void process_event(uv_work_t *req) {
-  Event *e = ((Event *)req->data);
+  lock_queue *lq = ((lock_queue *)req->data);
+  Event* e = (Event*)deq_event(lq);
 
   char *now = time_now();
   fprintf(stderr, "\n[%s] Got event data\n", now);
@@ -78,6 +125,7 @@ void process_event(uv_work_t *req) {
   async.data = (void *)points;
   uv_async_send(&async);*/
   free(now);
+  free_event(e);
 }
 
 void print_mouse_change(uv_async_t *handle) {
@@ -86,11 +134,7 @@ void print_mouse_change(uv_async_t *handle) {
 }
 
 void cleanup(uv_work_t *req, int status) {
-  fprintf(stderr, "cleaning up after mouse change");
-  Event *e = ((Event *)req->data);
-  if (e != NULL) {
-      free_event(e);
-  }
+  fprintf(stderr, "doing no cleanup");
   //free(e);
   // we should probably not clean async up here since multiple work requests
   // will use this async ? uv_close((uv_handle_t *)&async, NULL);
@@ -127,8 +171,10 @@ void process_data(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf) {
       parse_event(data, event);
       print_event(event);
 
-      req.data = (void *)event;
       fprintf(stderr, "queueing work: %s\n", data);
+      q_event(lqueue, event);
+
+      req.data = (void*)lqueue;
 
       int r = uv_queue_work(loop, &req, process_event, cleanup);
       if (r != 0)
@@ -185,6 +231,7 @@ void clean_evdev() {
 
 void clean(int sig) {
   remove_sock();
+  free_lock_queue(lqueue);
   clean_evdev();
 
   exit(0);
@@ -269,6 +316,7 @@ void init_input_device(char *path) {
 
 int main(int argc, char **argv) {
   // TODO: Check that we're sudo
+  lqueue = new_lock_queue();
 
   char *path = determine_device_path_from_args(argv, argc);
 
