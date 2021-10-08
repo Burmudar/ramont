@@ -5,6 +5,7 @@
 #include <time.h>
 
 #include "event.h"
+#include "path.h"
 #include <X11/Xlib.h>
 #include <libevdev/libevdev-uinput.h>
 #include <libevdev/libevdev.h>
@@ -12,11 +13,13 @@
 #include <uv.h>
 
 #define SOCKET_PATH "uv.socket"
+#define DEVICES_SCAN_PATH "/dev/input/by-path"
 
 uv_loop_t *loop;
 uv_async_t async;
 short dimensions[2];
 
+Coord last_coord;
 struct uinput_setup usetup;
 struct libevdev *dev;
 struct libevdev_uinput *uidev;
@@ -48,10 +51,11 @@ char *time_now() {
 }
 
 void move_mouse(Coord *coord) {
-  libevdev_uinput_write_event(uidev, EV_ABS, ABS_X, coord->x);
-  libevdev_uinput_write_event(uidev, EV_ABS, ABS_Y, coord->y);
-  libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 5);
-  sleep(1);
+  libevdev_uinput_write_event(uidev, EV_REL, REL_X, coord->x);
+  libevdev_uinput_write_event(uidev, EV_REL, REL_Y, coord->y);
+  libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 0);
+  usleep(7000);
+  fprintf(stderr, "Moved mouse - x: %5.16f y: %5.16f\n", coord->x, coord->y);
 }
 
 void process_event(uv_work_t *req) {
@@ -61,9 +65,14 @@ void process_event(uv_work_t *req) {
   fprintf(stderr, "\n[%s] Got event data\n", now);
   print_event(e);
 
-  Coord coord = translate_event_coord(e, dimensions[0], dimensions[1]);
-  print_coord(&coord);
-  move_mouse(&coord);
+  Coord mouse_coords = translate_event_coord(e, dimensions[0], dimensions[1]);
+
+  Coord move_coord = delta_coord(mouse_coords, last_coord);
+
+  print_coord(&mouse_coords);
+  move_mouse(&move_coord);
+
+  last_coord = mouse_coords;
 
   /*double points[2] = {1.0, 2.0};
   async.data = (void *)points;
@@ -79,8 +88,10 @@ void print_mouse_change(uv_async_t *handle) {
 void cleanup(uv_work_t *req, int status) {
   fprintf(stderr, "cleaning up after mouse change");
   Event *e = ((Event *)req->data);
-  free_event(e);
-  free(e);
+  if (e != NULL) {
+      free_event(e);
+  }
+  //free(e);
   // we should probably not clean async up here since multiple work requests
   // will use this async ? uv_close((uv_handle_t *)&async, NULL);
 }
@@ -179,17 +190,96 @@ void clean(int sig) {
   exit(0);
 }
 
-int main() {
+// Try to find the device path from the command line args, if not ...
+// scan a known device path. We'll return a device path under
+// two circumstances:
+// * The user gave a path on the command line (argc > 1)
+// * We only found one device at `/dev/input/by-path` that matches the regex
+//   .*-event-mouse$
+//
+// If the above conditions don't hold - WHELP, then we show the user all the
+// matching paths so that they can make an informed choice
+//
+// Also - if the conditions above are not met, you can expect a big fat NULL back
+char *determine_device_path_from_args(char **argv, int argc) {
+  if (argc > 1) {
+    return argv[1];
+  }
+
+  path_list_t *result = find_all_in_path(DEVICES_SCAN_PATH, ".+-event-mouse$");
+
+  if (result->error != 0) {
+    fprintf(stderr,
+            "Uh oh! Error! Some problem while scanning for devices in %s\n",
+            DEVICES_SCAN_PATH);
+    return NULL;
+  }
+
+  // Maybe we're lucky and only found one device!?
+  if (result->length == 1) {
+    fprintf(stderr, "Using only device found: %s\n", result->paths[0]);
+  }
+
+  // For now, lets show the found paths to the user and let them pick \o/
+  // TODO: Maybe this should be read from a config file instead ?
+  fprintf(stderr, "\nPick a path as pass it as an argument to uv_socket:\n");
+  fprintf(stderr, "uv_socket /dev/input/by-path/example-event-mouse\n");
+  fprintf(stderr, "\nAvailable device paths:\n");
+
+  for (int i = 0; i < result->length; i++) {
+    fprintf(stderr, "Path=%s\n", result->paths[i]);
+  }
+  free_path_list(result);
+
+  return NULL;
+  ;
+}
+
+// Tries to initialize the libevdev devices using the given path
+// Ideally, this method should return a struct that combines:
+// * The libevdev struct
+// * The libevdev_uinput struct
+//
+// Because this seems poop ... but lets get stuff working for now
+// and slap a TODO on this.
+//
+// BEWARE: This method will sprinkle some exit(1) when stuff doesn't go IT's WAY
+void init_input_device(char *path) {
+  fd = open(path, O_RDWR | O_NONBLOCK);
+
+  if (fd < 0) {
+    fprintf(stderr, "File - failed to open '%s': %s", path, strerror(fd));
+    // We should rather return a error code ?
+    exit(1);
+  }
+
+  int rc = libevdev_new_from_fd(fd, &dev);
+  if (rc < 0) {
+    printf("Failed to init libevdev (%s)\n", strerror(-rc));
+    exit(1);
+  }
+
+  rc = libevdev_uinput_create_from_device(dev, LIBEVDEV_UINPUT_OPEN_MANAGED,
+                                          &uidev);
+  if (rc < 0) {
+    printf("Failed to init evdev-uinput (%s)\n", strerror(-rc));
+    exit(1);
+  }
+}
+
+int main(int argc, char **argv) {
   // TODO: Check that we're sudo
-  // TODO: Read this from cmd line
-  // TODO: Maybe use this `cat /proc/bus/input/devices` to find the right input device
-  fd = open("/dev/input/event2", O_WRONLY | O_NONBLOCK);
-  ufd = open("/dev/uinput", O_RDWR);
 
-  libevdev_new_from_fd(fd, &dev);
-  libevdev_uinput_create_from_device(dev, ufd, &uidev);
+  char *path = determine_device_path_from_args(argv, argc);
 
-  sleep(1);
+  if (!path) {
+    fprintf(stderr, "No suitable input device found");
+    exit(1);
+  }
+
+  init_input_device(path);
+
+  // So when should we free path <_<
 
   load_dimensions(dimensions);
   fprintf(stderr, "\nWidth: %hd Height: %hd\n", dimensions[0], dimensions[1]);

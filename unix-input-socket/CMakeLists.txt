@@ -17,7 +17,8 @@ add_subdirectory(src)
 
 if(TARGET_GROUP STREQUAL release)
     # release things
-    add_executable(uv_socket src/uv_socket.c src/event.h src/event.c)
+    # Ahem, I believe there is better way than just this ever expanding long list of extra c files
+    add_executable(uv_socket src/uv_socket.c src/event.h src/event.c src/path.h src/path.c)
 
     pkg_check_modules(LIBX11 REQUIRED x11)
     set(RAMONT_LIBS "${LIBX11_LIBRARIES}")
