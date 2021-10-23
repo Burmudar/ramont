@@ -359,10 +359,12 @@ void init_task_t(task_t *t) {
 
 int main(int argc, char **argv) {
   // TODO: Check that we're sudo
+  load_dimensions(dimensions);
+  fprintf(stderr, "\nWidth: %hd Height: %hd\n", dimensions[0], dimensions[1]);
 
   Device *device = cramont_new("ramont_trackpad");
-  int x[] = {0, 1080};
-  int y[] = {0, 1080};
+  int x[] = {0, dimensions[0]/2};
+  int y[] = {0, dimensions[1]};
   int rc = cramont_init_trackpad(device, x, y);
   if (rc < 0) {
     fprintf(stderr, "failed to init fake trackpad: %s", strerror(-rc));
@@ -370,16 +372,14 @@ int main(int argc, char **argv) {
   }
 
   fprintf(stderr, "trackpad initialized\n");
-  for (int i = 100; i < 1000; i++) {
+  for (int i = 0; i < dimensions[0]/2; i++) {
     cramont_move(device, i, i);
-    usleep(15000);
+    usleep(1500);
   }
 
   cramont_free_device(device);
   exit(1);
 
-  load_dimensions(dimensions);
-  fprintf(stderr, "\nWidth: %hd Height: %hd\n", dimensions[0], dimensions[1]);
 
   loop = uv_default_loop();
 

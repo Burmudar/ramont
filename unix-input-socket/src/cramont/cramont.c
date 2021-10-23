@@ -28,6 +28,7 @@ int cramont_init_trackpad(Device *device, int x_dimension[2],
   x_info.resolution = 100;
   x_info.flat = 0;
   x_info.fuzz = 0;
+  x_info.value = 0;
   int rc = libevdev_enable_event_code(dev, EV_ABS, ABS_X, &x_info);
   if (rc != 0) {
     fprintf(stderr, "error 1\n");
@@ -41,6 +42,7 @@ int cramont_init_trackpad(Device *device, int x_dimension[2],
   y_info.resolution = 100;
   y_info.flat = 0;
   y_info.fuzz = 0;
+  y_info.value = 0;
   rc = libevdev_enable_event_code(dev, EV_ABS, ABS_Y, &y_info);
   if (rc != 0) {
     return rc;
