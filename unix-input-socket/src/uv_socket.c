@@ -4,7 +4,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "event/event.h"
+#include "cramont/cramont.h"
 #include "path/path.h"
 #include "queue/queue.h"
 #include <X11/Xlib.h>
@@ -48,7 +48,6 @@ lock_queue *new_lock_queue() {
 
   uv_mutex_t lock;
 
-
   uv_mutex_init(&lock);
 
   lq->lock = &lock;
@@ -65,7 +64,7 @@ void free_lock_queue(lock_queue *q) {
   free(q);
 }
 
-void q_event(lock_queue *lq, Event *ev) {
+void q_event(lock_queue *lq, DeviceEvent *ev) {
   uv_mutex_lock(lq->lock);
 
   enqueue(lq->queue, (void *)ev);
@@ -73,10 +72,10 @@ void q_event(lock_queue *lq, Event *ev) {
   uv_mutex_unlock(lq->lock);
 }
 
-Event *deq_event(lock_queue *lq) {
+DeviceEvent *deq_event(lock_queue *lq) {
   uv_mutex_lock(lq->lock);
 
-  Event *ev = (Event *)dequeue(lq->queue);
+  DeviceEvent *ev = (DeviceEvent *)dequeue(lq->queue);
 
   uv_mutex_unlock(lq->lock);
 
@@ -115,17 +114,18 @@ void move_mouse(Coord *coord) {
   fprintf(stderr, "Moved mouse - x: %5.16f y: %5.16f\n", coord->x, coord->y);
 }
 
-void process_event(Event *e) {
+void process_event(DeviceEvent *e) {
 
   char *now = time_now();
   fprintf(stderr, "\n[%s] Got event data\n", now);
-  print_event(e);
+  cramont_print_event(e);
 
-  Coord mouse_coords = translate_event_coord(e, dimensions[0], dimensions[1]);
+  Coord mouse_coords =
+      cramont_translate_event_to_coord(e, dimensions[0], dimensions[1]);
 
-  Coord move_coord = delta_coord(mouse_coords, last_coord);
+  Coord move_coord = cramont_delta_coord(mouse_coords, last_coord);
 
-  print_coord(&mouse_coords);
+  cramont_print_coord(&mouse_coords);
   move_mouse(&move_coord);
 
   last_coord = mouse_coords;
@@ -134,7 +134,7 @@ void process_event(Event *e) {
   async.data = (void *)points;
   uv_async_send(&async);*/
   free(now);
-  free_event(e);
+  cramont_free_event(e);
 }
 
 void print_mouse_change(uv_async_t *handle) {
@@ -176,9 +176,9 @@ void process_data(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf) {
       fprintf(stderr, "Failed to read event: '%s'\n", buf->base);
     } else if (length == nread) {
 
-      Event *event = new_event();
-      parse_event(data, event);
-      print_event(event);
+      DeviceEvent *event = cramont_new_event();
+      cramont_parse_event(data, event);
+      cramont_print_event(event);
 
       fprintf(stderr, "queueing work: %s\n", data);
       q_event(lqueue, event);
@@ -230,12 +230,7 @@ void remove_sock() {
   uv_fs_unlink(loop, &req, SOCKET_PATH, NULL);
 }
 
-void clean_evdev() {
-  libevdev_uinput_destroy(uidev);
-  libevdev_free(dev);
-  close(fd);
-  close(ufd);
-}
+void clean_evdev() {}
 
 void clean(int sig) {
   remove_sock();
@@ -336,7 +331,7 @@ void event_consumer(void *arg) {
     uv_cond_wait(task->cond, task->mutex);
 
     if (lq->queue->size > 1) {
-      Event *e = (Event *)deq_event(lq);
+      DeviceEvent *e = (DeviceEvent *)deq_event(lq);
       fprintf(stderr, "deq event");
 
       process_event(e);
@@ -364,18 +359,24 @@ void init_task_t(task_t *t) {
 
 int main(int argc, char **argv) {
   // TODO: Check that we're sudo
-  lqueue = new_lock_queue();
 
-  char *path = determine_device_path_from_args(argv, argc);
-
-  if (!path) {
-    fprintf(stderr, "No suitable input device found");
-    exit(1);
+  Device *device = cramont_new("ramont_trackpad");
+  int x[] = {0, 1080};
+  int y[] = {0, 1080};
+  int rc = cramont_init_trackpad(device, x, y);
+  if (rc < 0) {
+    fprintf(stderr, "failed to init fake trackpad: %s", strerror(-rc));
+    exit(rc);
   }
 
-  init_input_device(path);
+  fprintf(stderr, "trackpad initialized\n");
+  for (int i = 100; i < 1000; i++) {
+    cramont_move(device, i, i);
+    usleep(15000);
+  }
 
-  // So when should we free path <_<
+  cramont_free_device(device);
+  exit(1);
 
   load_dimensions(dimensions);
   fprintf(stderr, "\nWidth: %hd Height: %hd\n", dimensions[0], dimensions[1]);
