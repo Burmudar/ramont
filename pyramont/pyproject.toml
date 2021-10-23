@@ -5,7 +5,7 @@ description = ""
 authors = ["William Bezuidenhout <william.bezuidenhout+github@gmail.com>"]
 
 [tool.poetry.scripts]
-pyramont-server = 'pyramont.fake_mouse:cli'
+pyramont-server = 'pyramont.fake_device:cli'
 
 [tool.poetry.dependencies]
 python = "^3.8"
