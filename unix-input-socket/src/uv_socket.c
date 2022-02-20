@@ -4,8 +4,9 @@
 #include <string.h>
 #include <time.h>
 
-#include "event.h"
-#include "path.h"
+#include "cramont/cramont.h"
+#include "path/path.h"
+#include "queue/queue.h"
 #include <X11/Xlib.h>
 #include <libevdev/libevdev-uinput.h>
 #include <libevdev/libevdev.h>
@@ -14,17 +15,72 @@
 
 #define SOCKET_PATH "uv.socket"
 #define DEVICES_SCAN_PATH "/dev/input/by-path"
+#define TRUE 0
+#define FALSE 1
+
+typedef struct lock_queue {
+  uv_mutex_t *lock;
+  queue *queue;
+} lock_queue;
+
+typedef struct task_t {
+  uv_cond_t *cond;
+  uv_mutex_t *mutex;
+  void *data;
+  short done;
+} task_t;
 
 uv_loop_t *loop;
-uv_async_t async;
 short dimensions[2];
 
-Coord last_coord;
-struct uinput_setup usetup;
-struct libevdev *dev;
-struct libevdev_uinput *uidev;
-int fd;
-int ufd;
+lock_queue *lqueue;
+uv_thread_t event_consumer_thread;
+uv_cond_t *q_cond;
+
+Device *device;
+
+lock_queue *new_lock_queue() {
+  lock_queue *lq = malloc(sizeof(lock_queue));
+
+  uv_mutex_t lock;
+
+  uv_mutex_init(&lock);
+
+  lq->lock = &lock;
+  lq->queue = new_queue();
+
+  return lq;
+}
+
+void free_lock_queue(lock_queue *q) {
+  uv_mutex_lock(q->lock);
+  free(q->queue);
+  uv_mutex_unlock(q->lock);
+  uv_mutex_destroy(q->lock);
+  free(q);
+}
+
+void q_event(lock_queue *lq, DeviceEvent *ev) {
+  fprintf(stderr, "locking queue");
+  uv_mutex_lock(lq->lock);
+
+  enqueue(lq->queue, (void *)ev);
+
+  fprintf(stderr, "unlocked queue");
+  uv_mutex_unlock(lq->lock);
+}
+
+DeviceEvent *deq_event(lock_queue *lq) {
+  fprintf(stderr, "locking queue");
+  uv_mutex_lock(lq->lock);
+
+  DeviceEvent *ev = (DeviceEvent *)dequeue(lq->queue);
+
+  fprintf(stderr, "unlocked queue");
+  uv_mutex_unlock(lq->lock);
+
+  return ev;
+}
 
 void load_dimensions(short dimensions[]) {
   Display *display = XOpenDisplay(NULL);
@@ -48,52 +104,6 @@ char *time_now() {
   strftime(b, 26, "%Y-%m-%d %H:%M:%S", localtime(&t));
   sprintf(buff, "%s.%0.3ld", b, current_millis());
   return buff;
-}
-
-void move_mouse(Coord *coord) {
-  libevdev_uinput_write_event(uidev, EV_REL, REL_X, coord->x);
-  libevdev_uinput_write_event(uidev, EV_REL, REL_Y, coord->y);
-  libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 0);
-  usleep(7000);
-  fprintf(stderr, "Moved mouse - x: %5.16f y: %5.16f\n", coord->x, coord->y);
-}
-
-void process_event(uv_work_t *req) {
-  Event *e = ((Event *)req->data);
-
-  char *now = time_now();
-  fprintf(stderr, "\n[%s] Got event data\n", now);
-  print_event(e);
-
-  Coord mouse_coords = translate_event_coord(e, dimensions[0], dimensions[1]);
-
-  Coord move_coord = delta_coord(mouse_coords, last_coord);
-
-  print_coord(&mouse_coords);
-  move_mouse(&move_coord);
-
-  last_coord = mouse_coords;
-
-  /*double points[2] = {1.0, 2.0};
-  async.data = (void *)points;
-  uv_async_send(&async);*/
-  free(now);
-}
-
-void print_mouse_change(uv_async_t *handle) {
-  double *point = ((double *)handle->data);
-  fprintf(stderr, "Moved mouse - x: %f y: %f\n", *point, *(point + 1));
-}
-
-void cleanup(uv_work_t *req, int status) {
-  fprintf(stderr, "cleaning up after mouse change");
-  Event *e = ((Event *)req->data);
-  if (e != NULL) {
-      free_event(e);
-  }
-  //free(e);
-  // we should probably not clean async up here since multiple work requests
-  // will use this async ? uv_close((uv_handle_t *)&async, NULL);
 }
 
 void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
@@ -123,16 +133,17 @@ void process_data(uv_stream_t *client, ssize_t nread, const uv_buf_t *buf) {
       fprintf(stderr, "Failed to read event: '%s'\n", buf->base);
     } else if (length == nread) {
 
-      Event *event = new_event();
-      parse_event(data, event);
-      print_event(event);
+      DeviceEvent *event = cramont_new_event();
+      cramont_parse_event(data, event);
+      cramont_print_event(event);
 
-      req.data = (void *)event;
       fprintf(stderr, "queueing work: %s\n", data);
+      q_event(lqueue, event);
 
-      int r = uv_queue_work(loop, &req, process_event, cleanup);
-      if (r != 0)
-        fprintf(stderr, "failed to queue work: %d", r);
+      if (lqueue->queue->size > 2) {
+        fprintf(stderr, "signalling queue cond");
+        uv_cond_signal(q_cond);
+      }
     }
     if (length < nread) {
       // since there are more events, we should read the events here and add the
@@ -176,16 +187,13 @@ void remove_sock() {
   uv_fs_unlink(loop, &req, SOCKET_PATH, NULL);
 }
 
-void clean_evdev() {
-  libevdev_uinput_destroy(uidev);
-  libevdev_free(dev);
-  close(fd);
-  close(ufd);
-}
+void clean_evdev() {}
 
 void clean(int sig) {
   remove_sock();
+  free_lock_queue(lqueue);
   clean_evdev();
+  cramont_free_device(device);
 
   exit(0);
 }
@@ -200,7 +208,8 @@ void clean(int sig) {
 // If the above conditions don't hold - WHELP, then we show the user all the
 // matching paths so that they can make an informed choice
 //
-// Also - if the conditions above are not met, you can expect a big fat NULL back
+// Also - if the conditions above are not met, you can expect a big fat NULL
+// back
 char *determine_device_path_from_args(char **argv, int argc) {
   if (argc > 1) {
     return argv[1];
@@ -235,58 +244,91 @@ char *determine_device_path_from_args(char **argv, int argc) {
   ;
 }
 
-// Tries to initialize the libevdev devices using the given path
-// Ideally, this method should return a struct that combines:
-// * The libevdev struct
-// * The libevdev_uinput struct
-//
-// Because this seems poop ... but lets get stuff working for now
-// and slap a TODO on this.
-//
-// BEWARE: This method will sprinkle some exit(1) when stuff doesn't go IT's WAY
-void init_input_device(char *path) {
-  fd = open(path, O_RDWR | O_NONBLOCK);
+void process_event(DeviceEvent *e) {
 
-  if (fd < 0) {
-    fprintf(stderr, "File - failed to open '%s': %s", path, strerror(fd));
-    // We should rather return a error code ?
-    exit(1);
+  char *now = time_now();
+  fprintf(stderr, "\n[%s] Got event data\n", now);
+  cramont_print_event(e);
+
+  Coord mouse_coords =
+      cramont_translate_event_to_coord(e, dimensions[0], dimensions[1]);
+
+  cramont_print_coord(&mouse_coords);
+
+  free(now);
+  cramont_free_event(e);
+}
+
+
+void event_consumer(void *arg) {
+  fprintf(stderr, "starting up event consumer\n");
+  task_t *task = ((task_t *)arg);
+
+  lock_queue *lq = (lock_queue *)task->data;
+
+  while (task->done != TRUE) {
+    //fprintf(stderr, "locking task mutex\n");
+    //uv_mutex_lock(task->mutex);
+    fprintf(stderr, "waiting on task condition\n");
+    uv_cond_wait(task->cond, task->mutex);
+
+    if (lq->queue->size >= 1) {
+      DeviceEvent *e = (DeviceEvent *)deq_event(lq);
+      fprintf(stderr, "deq event");
+
+      process_event(e);
+    }
+
+    fprintf(stderr, "after waiting on task condition");
+    //uv_mutex_unlock(task->mutex);
+  }
+}
+
+void init_task_t(task_t *t) {
+  // Initialize as task
+  // The Task has a sync condition and a mutex so that we only process the queue
+  // (data) when it gets a signal
+  uv_cond_t cond;
+  uv_mutex_t mutex;
+  int rc = uv_cond_init(&cond);
+  if (rc != 0) {
+      fprintf(stderr, "failed to init cond_init");
+  }
+  uv_mutex_init(&mutex);
+  if (rc != 0) {
+      fprintf(stderr, "failed to init mutex_init");
   }
 
-  int rc = libevdev_new_from_fd(fd, &dev);
-  if (rc < 0) {
-    printf("Failed to init libevdev (%s)\n", strerror(-rc));
-    exit(1);
-  }
+  t->done = FALSE;
+  t->cond = &cond;
+  t->mutex = &mutex;
 
-  rc = libevdev_uinput_create_from_device(dev, LIBEVDEV_UINPUT_OPEN_MANAGED,
-                                          &uidev);
-  if (rc < 0) {
-    printf("Failed to init evdev-uinput (%s)\n", strerror(-rc));
-    exit(1);
-  }
+  t->data = (void *)new_lock_queue();
 }
 
 int main(int argc, char **argv) {
   // TODO: Check that we're sudo
-
-  char *path = determine_device_path_from_args(argv, argc);
-
-  if (!path) {
-    fprintf(stderr, "No suitable input device found");
-    exit(1);
-  }
-
-  init_input_device(path);
-
-  // So when should we free path <_<
-
   load_dimensions(dimensions);
   fprintf(stderr, "\nWidth: %hd Height: %hd\n", dimensions[0], dimensions[1]);
 
+  device = cramont_new("ramont_trackpad");
+  int x[] = {0, dimensions[0] / 2};
+  int y[] = {0, dimensions[1]};
+  int rc = cramont_init_trackpad(device, x, y);
+  if (rc < 0) {
+    fprintf(stderr, "failed to init fake trackpad: %s", strerror(-rc));
+    exit(rc);
+  }
+
   loop = uv_default_loop();
 
-  uv_async_init(loop, &async, print_mouse_change);
+  task_t event_task;
+  init_task_t(&event_task);
+  fprintf(stderr, "initialized even_task\n");
+
+  q_cond = event_task.cond;
+
+  uv_thread_create(&event_consumer_thread, event_consumer, &event_task);
 
   uv_pipe_t server;
   uv_pipe_init(loop, &server, 0);
@@ -302,5 +344,8 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Listen error: %s\n", uv_err_name(r));
     return 2;
   }
+
+  fprintf(stderr, "Starting loop");
+
   return uv_run(loop, UV_RUN_DEFAULT);
 }

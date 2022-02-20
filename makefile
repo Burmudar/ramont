@@ -24,8 +24,13 @@ run:
 build-server:
 	CGO_ENABLED=0 $(GO_BUILD_CMD)
 
+build-pyramont:
+	cd pyramont && poetry build
+
 release-backend:
-	$(MAKE) build-unix
+	#$(MAKE) build-unix
+	$(MAKE) build-pyramont
 	$(MAKE) build-server
-	cp -f ${UNIX_BASE_PATH}/uv_socket ${SRC}/vm/vm-share/
+	#cp -f ${UNIX_BASE_PATH}/uv_socket ${SRC}/vm/vm-share/
+	cp -f pyramont/dist/*.whl ${SRC}/vm/vm-share
 	cp -f ramont-server ${SRC}/vm/vm-share/
