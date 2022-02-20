@@ -6,5 +6,7 @@ fn main() {
         eprintln!("failed to parse args: {}", err);
         process::exit(1)
     });
-    ramont_rs::start_server(config);
+
+    let server = ramont_rs::Server::new(config);
+    server.start()
 }
