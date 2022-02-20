@@ -33,15 +33,11 @@ typedef struct task_t {
 uv_loop_t *loop;
 short dimensions[2];
 
-Coord last_coord;
-struct uinput_setup usetup;
-struct libevdev *dev;
-struct libevdev_uinput *uidev;
-int fd;
-int ufd;
 lock_queue *lqueue;
 uv_thread_t event_consumer_thread;
 uv_cond_t *q_cond;
+
+Device *device;
 
 lock_queue *new_lock_queue() {
   lock_queue *lq = malloc(sizeof(lock_queue));
@@ -65,18 +61,22 @@ void free_lock_queue(lock_queue *q) {
 }
 
 void q_event(lock_queue *lq, DeviceEvent *ev) {
+  fprintf(stderr, "locking queue");
   uv_mutex_lock(lq->lock);
 
   enqueue(lq->queue, (void *)ev);
 
+  fprintf(stderr, "unlocked queue");
   uv_mutex_unlock(lq->lock);
 }
 
 DeviceEvent *deq_event(lock_queue *lq) {
+  fprintf(stderr, "locking queue");
   uv_mutex_lock(lq->lock);
 
   DeviceEvent *ev = (DeviceEvent *)dequeue(lq->queue);
 
+  fprintf(stderr, "unlocked queue");
   uv_mutex_unlock(lq->lock);
 
   return ev;
@@ -104,49 +104,6 @@ char *time_now() {
   strftime(b, 26, "%Y-%m-%d %H:%M:%S", localtime(&t));
   sprintf(buff, "%s.%0.3ld", b, current_millis());
   return buff;
-}
-
-void move_mouse(Coord *coord) {
-  libevdev_uinput_write_event(uidev, EV_REL, REL_X, coord->x);
-  libevdev_uinput_write_event(uidev, EV_REL, REL_Y, coord->y);
-  libevdev_uinput_write_event(uidev, EV_SYN, SYN_REPORT, 0);
-  usleep(7000);
-  fprintf(stderr, "Moved mouse - x: %5.16f y: %5.16f\n", coord->x, coord->y);
-}
-
-void process_event(DeviceEvent *e) {
-
-  char *now = time_now();
-  fprintf(stderr, "\n[%s] Got event data\n", now);
-  cramont_print_event(e);
-
-  Coord mouse_coords =
-      cramont_translate_event_to_coord(e, dimensions[0], dimensions[1]);
-
-  Coord move_coord = cramont_delta_coord(mouse_coords, last_coord);
-
-  cramont_print_coord(&mouse_coords);
-  move_mouse(&move_coord);
-
-  last_coord = mouse_coords;
-
-  /*double points[2] = {1.0, 2.0};
-  async.data = (void *)points;
-  uv_async_send(&async);*/
-  free(now);
-  cramont_free_event(e);
-}
-
-void print_mouse_change(uv_async_t *handle) {
-  double *point = ((double *)handle->data);
-  fprintf(stderr, "Moved mouse - x: %f y: %f\n", *point, *(point + 1));
-}
-
-void cleanup(uv_work_t *req, int status) {
-  fprintf(stderr, "doing no cleanup");
-  // free(e);
-  // we should probably not clean async up here since multiple work requests
-  // will use this async ? uv_close((uv_handle_t *)&async, NULL);
 }
 
 void alloc_buffer(uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf) {
@@ -236,6 +193,7 @@ void clean(int sig) {
   remove_sock();
   free_lock_queue(lqueue);
   clean_evdev();
+  cramont_free_device(device);
 
   exit(0);
 }
@@ -286,37 +244,21 @@ char *determine_device_path_from_args(char **argv, int argc) {
   ;
 }
 
-// Tries to initialize the libevdev devices using the given path
-// Ideally, this method should return a struct that combines:
-// * The libevdev struct
-// * The libevdev_uinput struct
-//
-// Because this seems poop ... but lets get stuff working for now
-// and slap a TODO on this.
-//
-// BEWARE: This method will sprinkle some exit(1) when stuff doesn't go IT's WAY
-void init_input_device(char *path) {
-  fd = open(path, O_RDWR | O_NONBLOCK);
+void process_event(DeviceEvent *e) {
 
-  if (fd < 0) {
-    fprintf(stderr, "File - failed to open '%s': %s", path, strerror(fd));
-    // We should rather return a error code ?
-    exit(1);
-  }
+  char *now = time_now();
+  fprintf(stderr, "\n[%s] Got event data\n", now);
+  cramont_print_event(e);
 
-  int rc = libevdev_new_from_fd(fd, &dev);
-  if (rc < 0) {
-    printf("Failed to init libevdev (%s)\n", strerror(-rc));
-    exit(1);
-  }
+  Coord mouse_coords =
+      cramont_translate_event_to_coord(e, dimensions[0], dimensions[1]);
 
-  rc = libevdev_uinput_create_from_device(dev, LIBEVDEV_UINPUT_OPEN_MANAGED,
-                                          &uidev);
-  if (rc < 0) {
-    printf("Failed to init evdev-uinput (%s)\n", strerror(-rc));
-    exit(1);
-  }
+  cramont_print_coord(&mouse_coords);
+
+  free(now);
+  cramont_free_event(e);
 }
+
 
 void event_consumer(void *arg) {
   fprintf(stderr, "starting up event consumer\n");
@@ -325,12 +267,12 @@ void event_consumer(void *arg) {
   lock_queue *lq = (lock_queue *)task->data;
 
   while (task->done != TRUE) {
-    fprintf(stderr, "locking task mutex\n");
-    uv_mutex_lock(task->mutex);
+    //fprintf(stderr, "locking task mutex\n");
+    //uv_mutex_lock(task->mutex);
     fprintf(stderr, "waiting on task condition\n");
     uv_cond_wait(task->cond, task->mutex);
 
-    if (lq->queue->size > 1) {
+    if (lq->queue->size >= 1) {
       DeviceEvent *e = (DeviceEvent *)deq_event(lq);
       fprintf(stderr, "deq event");
 
@@ -338,7 +280,7 @@ void event_consumer(void *arg) {
     }
 
     fprintf(stderr, "after waiting on task condition");
-    uv_mutex_unlock(task->mutex);
+    //uv_mutex_unlock(task->mutex);
   }
 }
 
@@ -348,13 +290,20 @@ void init_task_t(task_t *t) {
   // (data) when it gets a signal
   uv_cond_t cond;
   uv_mutex_t mutex;
-  uv_cond_init(&cond);
+  int rc = uv_cond_init(&cond);
+  if (rc != 0) {
+      fprintf(stderr, "failed to init cond_init");
+  }
   uv_mutex_init(&mutex);
+  if (rc != 0) {
+      fprintf(stderr, "failed to init mutex_init");
+  }
 
   t->done = FALSE;
   t->cond = &cond;
   t->mutex = &mutex;
-  t->data = (void *)lqueue;
+
+  t->data = (void *)new_lock_queue();
 }
 
 int main(int argc, char **argv) {
@@ -362,24 +311,14 @@ int main(int argc, char **argv) {
   load_dimensions(dimensions);
   fprintf(stderr, "\nWidth: %hd Height: %hd\n", dimensions[0], dimensions[1]);
 
-  Device *device = cramont_new("ramont_trackpad");
-  int x[] = {0, dimensions[0]/2};
+  device = cramont_new("ramont_trackpad");
+  int x[] = {0, dimensions[0] / 2};
   int y[] = {0, dimensions[1]};
   int rc = cramont_init_trackpad(device, x, y);
   if (rc < 0) {
     fprintf(stderr, "failed to init fake trackpad: %s", strerror(-rc));
     exit(rc);
   }
-
-  fprintf(stderr, "trackpad initialized\n");
-  for (int i = 0; i < dimensions[0]/2; i++) {
-    cramont_move(device, i, i);
-    usleep(1500);
-  }
-
-  cramont_free_device(device);
-  exit(1);
-
 
   loop = uv_default_loop();
 
