@@ -1,5 +1,6 @@
+use std::io::{BufRead, BufReader, Read};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::sync::{mpsc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
 use std::{env, thread};
 
@@ -26,10 +27,10 @@ impl Config {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Event {}
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Message {
     New,
     Move(Event),
@@ -37,61 +38,93 @@ enum Message {
     Error,
 }
 
-struct EventDaemon<'a> {
-    thread: &'a Option<JoinHandle<()>>,
-    receiver: Mutex<mpsc::Receiver<Message>>,
+type MessageHandler = fn(msg: Message) -> Option<Message>;
+
+struct EventDaemon {
+    sender: mpsc::Sender<Message>,
+    receiver: Arc<Mutex<mpsc::Receiver<Message>>>,
+    handler: Arc<MessageHandler>,
+    worker: Option<JoinHandle<()>>,
 }
 
-impl<'a> EventDaemon<'a> {
-    fn new(receiver: mpsc::Receiver<Message>) -> EventDaemon<'a> {
+fn handle_message(msg: Message) -> Option<Message> {
+    match msg {
+        Message::New => println!("New event src"),
+        Message::Move(event) => println!("Event received: {:?}", event),
+        Message::Terminate => return Some(msg),
+        _ => println!("Received {:?}", msg),
+    };
+    None
+}
+
+impl EventDaemon {
+    fn new(handler: MessageHandler) -> EventDaemon {
+        let (sender, receiver) = mpsc::channel();
+        let receiver = Arc::new(Mutex::new(receiver));
+        let handler = Arc::new(handler);
+
         EventDaemon {
-            receiver: Mutex::new(receiver),
-            thread: &None,
+            sender,
+            receiver,
+            handler,
+            worker: None,
         }
     }
 
-    fn start(&'a mut self) {
-        self.thread = &'a Some(thread::spawn(|| loop {
-            let msg = self.receiver.lock().unwrap().recv().unwrap_or_else(|err| {
+    fn start(&mut self) {
+        // Important to clone the vars that will be shared across the thread boundary
+        // Clone increases the reference count for the Arcs Handler and Receiver
+        let handler = self.handler.clone();
+        let receiver = self.receiver.clone();
+
+        let thread_handle = thread::spawn(move || loop {
+            let msg = receiver.lock().unwrap().recv().unwrap_or_else(|err| {
                 eprintln!("Error receiving message: {}", err);
                 Message::Error
             });
 
-            if Message::Terminate == self.handle_message(msg) {
+            // We cannot use self here, since that would mean self has to be shared
+            // outside of the thread scope, which we don't want
+            //
+            // -------- Main Thread -------------
+            // |                                |
+            // |  self  ------ Inner Thread ----|
+            // |        |                      ||
+            // |        |       self           ||
+            // |        |                      ||
+            // |        |______________________||
+            // |________________________________
+            //
+            // As per above, if we use self inside the inner thread we would
+            // then have to clone it or do SOME OTHER MAGIC
+            //
+            // This is why MessageHandler has been created. As it has no shared
+            // state with self
+
+            if Message::Terminate == handler(msg).unwrap() {
                 println!("Shutting down EventDaemon.");
                 break;
             }
-        }));
-    }
+        });
 
-    fn handle_message(self, msg: Message) -> Message {
-        match msg {
-            Message::New => println!("New event src"),
-            Message::Move(event) => println!("Event received: {:?}", event),
-            _ => println!("Received {:?}", msg),
-        };
-        msg
+        self.worker = Some(thread_handle);
     }
 }
 
-pub struct Server<'a> {
+pub struct Server {
     config: Config,
-    sender: mpsc::Sender<Message>,
-    event_daemon: EventDaemon<'a>,
+    event_daemon: EventDaemon,
 }
 
-impl<'a> Server<'a> {
-    pub fn new(config: Config) -> Server<'a> {
-        let (sender, receiver) = mpsc::channel();
-
+impl Server {
+    pub fn new(config: Config) -> Server {
         Server {
             config,
-            sender,
-            event_daemon: EventDaemon::new(receiver),
+            event_daemon: EventDaemon::new(handle_message),
         }
     }
 
-    pub fn start(&self) {
+    pub fn start(&mut self) {
         self.event_daemon.start();
         self.listen();
         println!("Shutting down");
@@ -111,6 +144,14 @@ impl<'a> Server<'a> {
     }
 
     fn handle_stream(&self, stream: UnixStream) {
-        println!("Stream connected!")
+        println!("Stream connected");
+        let reader = BufReader::new(&stream);
+        for line in reader.lines() {
+            match line {
+                Ok(v) => println!("Received: {}", v),
+                Err(err) => eprintln!("Stream error: {}", err),
+            }
+        }
+        println!("Stream disconnected");
     }
 }

@@ -7,6 +7,6 @@ fn main() {
         process::exit(1)
     });
 
-    let server = ramont_rs::Server::new(config);
+    let mut server = ramont_rs::Server::new(config);
     server.start()
 }
