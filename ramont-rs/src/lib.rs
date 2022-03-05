@@ -1,8 +1,8 @@
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
-use std::{env, thread};
+use std::{env, error, thread};
 
 #[derive(Debug)]
 pub struct Config {
@@ -35,26 +35,25 @@ enum Message {
     New,
     Move(Event),
     Terminate,
-    Error,
+    Error(mpsc::RecvError),
 }
 
 type MessageHandler = fn(msg: Message) -> Option<Message>;
+fn handle_message(msg: Message) -> Option<Message> {
+    match msg {
+        Message::New => println!("New event src"),
+        Message::Move(event) => println!("Event received: {:?}", event),
+        Message::Terminate => return Some(msg),
+        Message::Error(err) => eprintln!("Error message: {}", err),
+    };
+    None
+}
 
 struct EventDaemon {
     sender: mpsc::Sender<Message>,
     receiver: Arc<Mutex<mpsc::Receiver<Message>>>,
     handler: Arc<MessageHandler>,
     worker: Option<JoinHandle<()>>,
-}
-
-fn handle_message(msg: Message) -> Option<Message> {
-    match msg {
-        Message::New => println!("New event src"),
-        Message::Move(event) => println!("Event received: {:?}", event),
-        Message::Terminate => return Some(msg),
-        _ => println!("Received {:?}", msg),
-    };
-    None
 }
 
 impl EventDaemon {
@@ -77,10 +76,11 @@ impl EventDaemon {
         let handler = self.handler.clone();
         let receiver = self.receiver.clone();
 
+        // Move lets the closure take ownsership of surrouding variables
         let thread_handle = thread::spawn(move || loop {
             let msg = receiver.lock().unwrap().recv().unwrap_or_else(|err| {
                 eprintln!("Error receiving message: {}", err);
-                Message::Error
+                Message::Error(err)
             });
 
             // We cannot use self here, since that would mean self has to be shared
