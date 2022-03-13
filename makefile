@@ -19,7 +19,7 @@ unix:
 
 run:
 	$(WEBPACK_CMD)
-	RAMONT_STATIC=static $(GO_RUN_CMD)
+	RAMONT_STATIC=static $(GO_RUN_CMD) ramont-rs.socket
 
 build-server:
 	CGO_ENABLED=0 $(GO_BUILD_CMD)
