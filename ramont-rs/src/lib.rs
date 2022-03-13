@@ -2,7 +2,7 @@ use std::io::{BufRead, BufReader};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
-use std::{env, error, thread};
+use std::{env, thread};
 
 #[derive(Debug)]
 pub struct Config {
@@ -111,6 +111,17 @@ impl EventDaemon {
     }
 }
 
+fn rm_if_exists(path: &String) {
+    if let Some(_) = std::path::Path::new(path)
+        .exists()
+        .then(|| std::fs::remove_file(path))
+    {
+        eprintln!("Socket deleted: {}", path);
+    } else {
+        eprintln!("Failed to delete Socket: {}", path);
+    }
+}
+
 pub struct Server {
     config: Config,
     event_daemon: EventDaemon,
@@ -131,6 +142,7 @@ impl Server {
     }
 
     fn listen(&self) {
+        rm_if_exists(&self.config.socket_path);
         let listener = UnixListener::bind(&self.config.socket_path).unwrap();
 
         println!("Listening at {}", self.config.socket_path);
