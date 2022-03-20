@@ -1,3 +1,5 @@
+pub mod device;
+
 use std::io::{BufRead, BufReader};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::{mpsc, Arc, Mutex};

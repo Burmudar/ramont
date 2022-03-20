@@ -1,4 +1,6 @@
-use ramont_rs::Config;
+mod ramont;
+use ramont::virtual_device::Mouse;
+use ramont::{Config, Server};
 use std::{env, process};
 
 fn main() {
@@ -7,6 +9,6 @@ fn main() {
         process::exit(1)
     });
 
-    let mut server = ramont_rs::Server::new(config);
+    let mut server = Server::new(config);
     server.start()
 }
