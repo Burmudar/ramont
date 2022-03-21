@@ -6,7 +6,7 @@ import (
 	"os"
 	"path"
 
-	"github.com/Burmudar/ramon-go/ramont"
+	"github.com/burmudar/ramon-go/ramont"
 	"github.com/gin-gonic/gin"
 )
 
