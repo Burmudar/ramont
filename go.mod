@@ -1,4 +1,4 @@
-module github.com/Burmudar/ramon-go
+module github.com/burmudar/ramon-go
 
 go 1.14
 

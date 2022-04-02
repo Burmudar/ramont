@@ -29,12 +29,10 @@ struct Coordinate {
     y: i32,
 }
 
-struct Dimension {
+pub struct Dimension {
     width: i32,
     height: i32,
 }
-
-const ZERO_TIME: TimeVal = TimeVal::new(0, 0);
 
 impl Mouse {
     pub fn new(name: &str) -> Mouse {
@@ -83,7 +81,7 @@ impl Mouse {
 
 impl VirtualDevice for Mouse {
     fn r#move(&self, x: i32, y: i32) -> Result<(), std::io::Error> {
-        let c = *self.last_move.lock().unwrap();
+        let mut c = &mut *self.last_move.lock().unwrap();
 
         // we do this to get the delta of the the old and new point
         // essentially we're answering "How many units must I move from the old position to the new
@@ -91,13 +89,15 @@ impl VirtualDevice for Mouse {
         let x = (c.x - x).abs();
         let y = (c.y - y).abs();
 
+        let zero_time: TimeVal = TimeVal::new(0, 0);
+
         self.device.write_event(&InputEvent::new(
-            &ZERO_TIME,
+            &zero_time,
             &EventCode::EV_REL(EV_REL::REL_X),
             x,
         ));
         self.device.write_event(&InputEvent::new(
-            &ZERO_TIME,
+            &zero_time,
             &EventCode::EV_REL(EV_REL::REL_Y),
             y,
         ));
@@ -109,8 +109,9 @@ impl VirtualDevice for Mouse {
     }
 
     fn sync(&self) -> Result<(), std::io::Error> {
+        let zero_time: TimeVal = TimeVal::new(0, 0);
         self.device.write_event(&InputEvent::new(
-            &ZERO_TIME,
+            &zero_time,
             &EventCode::EV_SYN(EV_SYN::SYN_REPORT),
             0,
         ))
@@ -188,15 +189,17 @@ impl Trackpad {
 
 impl VirtualDevice for Trackpad {
     fn r#move(&self, x: i32, y: i32) -> Result<(), std::io::Error> {
-        let c = *self.last_move.lock().unwrap();
+        let mut c = &mut *self.last_move.lock().unwrap();
+
+        let zero_time: TimeVal = TimeVal::new(0, 0);
 
         self.device.write_event(&InputEvent::new(
-            &ZERO_TIME,
+            &zero_time,
             &EventCode::EV_ABS(EV_ABS::ABS_Y),
             x,
         ));
         self.device.write_event(&InputEvent::new(
-            &ZERO_TIME,
+            &zero_time,
             &EventCode::EV_ABS(EV_ABS::ABS_X),
             y,
         ));
@@ -208,8 +211,9 @@ impl VirtualDevice for Trackpad {
     }
 
     fn sync(&self) -> Result<(), std::io::Error> {
+        let zero_time: TimeVal = TimeVal::new(0, 0);
         self.device.write_event(&InputEvent::new(
-            &ZERO_TIME,
+            &zero_time,
             &EventCode::EV_SYN(EV_SYN::SYN_REPORT),
             0,
         ))

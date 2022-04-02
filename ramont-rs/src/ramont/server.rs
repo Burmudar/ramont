@@ -1,8 +1,11 @@
+use std::fmt::Display;
 use std::io::{BufRead, BufReader};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
 use std::{env, thread};
+
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub struct Config {
@@ -27,10 +30,29 @@ impl Config {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-enum Event {}
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+struct Event {
+    #[serde(rename(serialize = "type", deserialize = "type"))]
+    event_type: String,
+    #[serde(rename(serialize = "unitX", deserialize = "unitX"))]
+    unit_x: f32,
+    #[serde(rename(serialize = "unitY", deserialize = "unitY"))]
+    unit_y: f32,
+}
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+impl Eq for Event {}
+
+impl Display for Event {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Event({}, {}, {})",
+            self.event_type, self.unit_x, self.unit_y
+        )
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 enum Message {
     New,
     Move(Event),
@@ -50,7 +72,7 @@ fn handle_message(msg: Message) -> Option<Message> {
 }
 
 trait Observable<T> {
-    fn on_notify(&mut self, item: T);
+    fn on_notify(&mut self, item: &T);
 }
 
 struct EventDaemon {
@@ -59,7 +81,7 @@ struct EventDaemon {
     worker: Option<JoinHandle<()>>,
 }
 
-impl EventDaemon {
+/* impl EventDaemon {
     fn new(handler: MessageHandler) -> EventDaemon {
         let (sender, receiver) = mpsc::channel();
         let handler = Arc::new(handler);
@@ -152,7 +174,7 @@ impl EventDaemon {
         self.worker = Some(thread_handle);
     }
 }
-
+*/
 fn rm_if_exists(path: &String) {
     if let Some(_) = std::path::Path::new(path)
         .exists()
@@ -164,26 +186,55 @@ fn rm_if_exists(path: &String) {
     }
 }
 
+struct EventPrinter {}
+
+impl Observable<Event> for EventPrinter {
+    fn on_notify(&mut self, item: &Event) {
+        println!("On Notifiy of event: {}", item)
+    }
+}
+
+pub struct EventSystem {
+    observables: Vec<Box<dyn Observable<Event>>>,
+}
+
+impl EventSystem {
+    pub fn new() -> EventSystem {
+        let printer: Box<dyn Observable<Event>> = Box::new(EventPrinter {});
+        let observables = vec![printer];
+        EventSystem { observables }
+    }
+
+    pub fn add(&mut self, item: Box<dyn Observable<Event>>) {
+        self.observables.push(item);
+    }
+
+    pub fn notify(&mut self, event: Event) {
+        for obs in self.observables.iter_mut() {
+            obs.on_notify(&event);
+        }
+    }
+}
+
 pub struct Server {
     config: Config,
-    event_daemon: EventDaemon,
+    event_sys: EventSystem,
 }
 
 impl Server {
     pub fn new(config: Config) -> Server {
         Server {
             config,
-            event_daemon: EventDaemon::new(handle_message),
+            event_sys: EventSystem::new(),
         }
     }
 
     pub fn start(&mut self) {
-        self.event_daemon.start();
         self.listen();
         println!("Shutting down");
     }
 
-    fn listen(&self) {
+    fn listen(&mut self) {
         //TODO: We should rather just exit cleanly and clean up the socket
         rm_if_exists(&self.config.socket_path);
         let listener = UnixListener::bind(&self.config.socket_path).unwrap();
@@ -192,21 +243,33 @@ impl Server {
 
         for stream in listener.incoming() {
             match stream {
-                Ok(stream) => self.handle_stream(stream),
+                Ok(stream) => handle_stream(stream, &mut self.event_sys),
                 Err(err) => println!("Error with incoming stream: {}", err),
             }
         }
     }
+}
 
-    fn handle_stream(&self, stream: UnixStream) {
-        println!("Stream connected");
-        let reader = BufReader::new(&stream);
-        for line in reader.lines() {
-            match line {
-                Ok(v) => println!("Received: {}", v),
-                Err(err) => eprintln!("Stream error: {}", err),
+fn handle_stream(stream: UnixStream, event_system: &mut EventSystem) {
+    println!("Stream connected");
+    let reader = BufReader::new(&stream);
+    for line in reader.lines() {
+        match line {
+            Ok(v) => {
+                if let Some(event) = parse_event(&v) {
+                    event_system.notify(event);
+                }
             }
+            Err(err) => eprintln!("Stream error: {}", err),
         }
-        println!("Stream disconnected");
+    }
+    println!("Stream disconnected");
+}
+
+fn parse_event(value: &str) -> Option<Event> {
+    if let serde_json::Result::Ok(event) = serde_json::from_str(&value) {
+        Some(event)
+    } else {
+        None
     }
 }
