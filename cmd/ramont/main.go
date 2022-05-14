@@ -6,7 +6,7 @@ import (
 	"os"
 	"path"
 
-	"github.com/burmudar/ramon-go/ramont"
+	"github.com/burmudar/ramont/ramont"
 	"github.com/gin-gonic/gin"
 )
 
@@ -57,11 +57,11 @@ func start(onEvent ramont.EventHandelerFunc) {
 }
 
 func main() {
-    if len(os.Args) == 1 {
-        log.Panicln("Missing argument: unix socket path")
-    }
+	if len(os.Args) == 1 {
+		log.Panicln("Missing argument: unix socket path")
+	}
 
-    eventHandler := OnEvent(os.Args[1])
+	eventHandler := OnEvent(os.Args[1])
 
 	start(eventHandler)
 }
